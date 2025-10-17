@@ -101,17 +101,24 @@ function fetchListings(Client $client, string $url): array {
                 $title = $node->attr('title') ?: trim($node->text());
             }
             
-            // Last resort: try to extract title from URL
+            // Last resort: try to extract title from URL using string functions
             if (!$title || strlen($title) < 5 || $title === 'Wyrnione' || strpos($title, 'css-') !== false) {
                 // Extract title from URL like "iphone-17-256gb-czarny-CID99-ID17SbOQ.html"
-                // Pattern: /oferta/[TITLE]-CID99-ID[ID].html
-                if (preg_match('/\/oferta\/(.+)-CID99-ID[^-]+\.html/', $href, $matches)) {
-                    $urlTitle = $matches[1];
+                // Find position of /oferta/ and -CID99
+                $ofertaPos = strpos($href, '/oferta/');
+                $cid99Pos = strpos($href, '-CID99');
+                
+                if ($ofertaPos !== false && $cid99Pos !== false && $cid99Pos > $ofertaPos) {
+                    // Extract the title part between /oferta/ and -CID99
+                    $startPos = $ofertaPos + 8; // Length of '/oferta/'
+                    $length = $cid99Pos - $startPos;
+                    $urlTitle = substr($href, $startPos, $length);
+                    
                     // Convert dashes to spaces and capitalize
                     $urlTitle = str_replace('-', ' ', $urlTitle);
                     $urlTitle = ucwords($urlTitle);
                     $title = $urlTitle;
-                    error_log("Using URL-based title: '{$title}'");
+                    error_log("Using URL-based title (string method): '{$title}'");
                 }
             }
             
@@ -364,14 +371,23 @@ function fetchListings(Client $client, string $url): array {
         // Test URL-based title extraction
         error_log("--- TESTING URL TITLE EXTRACTION ---");
         error_log("Full URL: '{$href}'");
-        if (preg_match('/\/oferta\/(.+)-CID99-ID[^-]+\.html/', $href, $matches)) {
-            $urlTitle = $matches[1];
+        
+        // Test string-based extraction
+        $ofertaPos = strpos($href, '/oferta/');
+        $cid99Pos = strpos($href, '-CID99');
+        error_log("Oferta position: " . ($ofertaPos !== false ? $ofertaPos : 'not found'));
+        error_log("CID99 position: " . ($cid99Pos !== false ? $cid99Pos : 'not found'));
+        
+        if ($ofertaPos !== false && $cid99Pos !== false && $cid99Pos > $ofertaPos) {
+            $startPos = $ofertaPos + 8; // Length of '/oferta/'
+            $length = $cid99Pos - $startPos;
+            $urlTitle = substr($href, $startPos, $length);
             error_log("URL title raw: '{$urlTitle}'");
             $urlTitle = str_replace('-', ' ', $urlTitle);
             $urlTitle = ucwords($urlTitle);
             error_log("URL title processed: '{$urlTitle}'");
         } else {
-            error_log("URL pattern did not match");
+            error_log("String extraction failed");
         }
         
         error_log("Final listing data: " . json_encode([
