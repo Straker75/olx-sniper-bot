@@ -160,10 +160,10 @@ class OLXSniperBot:
                         # Log container HTML for debugging
                         logger.debug(f"Container HTML: {str(container)[:200]}...")
                 
-                # Only include offers from today (temporarily disabled for testing)
-                # if not self.is_today_offer(publish_date):
-                #     logger.debug(f"Skipping offer from {publish_date}: {title}")
-                #     continue
+                # Only include offers from today
+                if not self.is_today_offer(publish_date):
+                    logger.debug(f"Skipping offer from {publish_date}: {title}")
+                    continue
                 
                 listing = {
                     'id': listing_id,
@@ -186,7 +186,7 @@ class OLXSniperBot:
                     unique_listings.append(listing)
                     seen_ids.add(listing['id'])
             
-            logger.info(f"Found {len(unique_listings)} unique TODAY'S listings (filtered out old offers)")
+            logger.info(f"Found {len(unique_listings)} unique TODAY'S listings out of {len(listings)} total offers")
             return unique_listings
             
         except Exception as e:
@@ -440,40 +440,40 @@ class OLXSniperBot:
                 date_elem = element.select_one(selector)
                 if date_elem:
                     date_text = date_elem.get_text().strip()
-                    logger.debug(f"Checking date text with selector '{selector}': {date_text}")
+                    logger.info(f"Checking date text with selector '{selector}': {date_text}")
                     # Look for date patterns like "Dzisiaj o 10:32", "Wczoraj o 15:20", "17.10.2024"
                     date_match = re.search(r'(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', date_text)
                     if date_match:
-                        logger.debug(f"Found date with selector '{selector}': {date_match.group(1)}")
+                        logger.info(f"Found date with selector '{selector}': {date_match.group(1)}")
                         return date_match.group(1)
             
             # Look for date patterns in all text
             text = element.get_text()
-            logger.debug(f"Checking all text for date: {text[:100]}...")
+            logger.info(f"Checking all text for date: {text[:200]}...")
             date_match = re.search(r'(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', text)
             if date_match:
-                logger.debug(f"Found date in text: {date_match.group(1)}")
+                logger.info(f"Found date in text: {date_match.group(1)}")
                 return date_match.group(1)
             
-            # If no date found, return "Dzisiaj" as default
-            logger.debug("No date found, defaulting to 'Dzisiaj'")
-            return "Dzisiaj"
+            # If no date found, return None (don't assume it's today)
+            logger.info("No date found in element")
+            return None
                 
         except Exception as e:
-            logger.debug(f"Error extracting publish date: {e}")
-            return "Dzisiaj"
+            logger.info(f"Error extracting publish date: {e}")
+            return None
     
     def is_today_offer(self, date_str):
         """Check if the offer is from today"""
         if not date_str:
-            # If no date found, assume it's recent and include it
-            logger.debug("No date found, including offer as recent")
-            return True
+            # If no date found, exclude it (we want to be strict)
+            logger.info("No date found, excluding offer")
+            return False
         
         try:
             # Check for "Dzisiaj" (Today)
             if 'Dzisiaj' in date_str:
-                logger.debug(f"Found 'Dzisiaj' in date: {date_str}")
+                logger.info(f"Found 'Dzisiaj' in date: {date_str} - INCLUDING")
                 return True
             
             # Check for specific date format (DD.MM.YYYY)
@@ -482,16 +482,16 @@ class OLXSniperBot:
                 today = datetime.now()
                 offer_date = datetime.strptime(date_str, '%d.%m.%Y')
                 is_today = offer_date.date() == today.date()
-                logger.debug(f"Date comparison: {date_str} vs {today.strftime('%d.%m.%Y')} = {is_today}")
+                logger.info(f"Date comparison: {date_str} vs {today.strftime('%d.%m.%Y')} = {is_today}")
                 return is_today
             
-            # If date format is not recognized, include it (might be "Dzisiaj o 10:32" format)
-            logger.debug(f"Unrecognized date format, including offer: {date_str}")
-            return True
+            # If date format is not recognized, exclude it (be strict)
+            logger.info(f"Unrecognized date format, excluding offer: {date_str}")
+            return False
             
         except Exception as e:
-            logger.debug(f"Error checking if offer is from today: {e}, including offer")
-            return True
+            logger.info(f"Error checking if offer is from today: {e}, excluding offer")
+            return False
     
     def send_discord_notification(self, listing):
         """Send Discord webhook notification"""
