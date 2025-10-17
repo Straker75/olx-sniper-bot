@@ -26,4 +26,4 @@ RUN chmod +x sniperbot.py app.py
 EXPOSE 8080
 
 # Start the application
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "2", "app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 2 app:app"]

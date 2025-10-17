@@ -4,8 +4,8 @@
     "builder": "DOCKERFILE"
   },
   "deploy": {
-    "startCommand": "/start.sh",
-    "healthcheckPath": "/",
+    "startCommand": "gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 app:app",
+    "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
