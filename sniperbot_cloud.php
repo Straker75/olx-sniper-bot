@@ -95,11 +95,18 @@ function fetchListings(Client $client, string $url): array {
                 $title = $node->attr('title') ?: trim($node->text());
             }
             
-            // Clean up title
+            // Clean up title - remove HTML tags, CSS classes, and extra whitespace
+            $title = strip_tags($title);
             $title = preg_replace('/\s+/', ' ', $title);
+            $title = preg_replace('/[^\w\s\-\.\,\!\?\(\)]/', '', $title); // Remove special chars except basic punctuation
             $title = trim($title);
+            
+            // Limit title length
+            if (strlen($title) > 100) {
+                $title = substr($title, 0, 97) . '...';
+            }
         } catch (Exception $e) {
-            $title = trim($node->text());
+            $title = trim(strip_tags($node->text()));
         }
 
         // Price - try multiple selectors for OLX
@@ -135,9 +142,23 @@ function fetchListings(Client $client, string $url): array {
                 }
             }
             
-            // Clean up price
+            // Clean up price - remove HTML tags, CSS classes, and format properly
+            $price = strip_tags($price);
             $price = preg_replace('/\s+/', ' ', $price);
+            
+            // Extract only price with currency (remove extra text)
+            if (preg_match('/(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))/i', $price, $matches)) {
+                $price = $matches[1];
+            }
+            
+            // Clean up price format
+            $price = preg_replace('/[^\d\s,\.złPLN€\$]/', '', $price);
             $price = trim($price);
+            
+            // If no currency found, add zł as default
+            if ($price && !preg_match('/(zł|PLN|€|\$)/i', $price)) {
+                $price .= ' zł';
+            }
         } catch (Exception $e) {
             $price = '';
         }
