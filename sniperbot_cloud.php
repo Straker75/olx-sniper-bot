@@ -180,36 +180,46 @@ function fetchListings(Client $client, string $url): array {
 
 // Send to Discord webhook with retry logic
 function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
+    // Clean and validate data
+    $title = substr($listing['title'], 0, 256); // Discord title limit
+    $price = substr($listing['price'], 0, 100); // Reasonable price limit
+    $url = $listing['url'];
+    
+    // Ensure URL is valid
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        error_log("Invalid URL for listing {$listing['id']}: {$url}");
+        return false;
+    }
+    
     $data = [
-        "content" => "🚀 **New listing found on OLX!**",
-        "username" => "OLX Sniper Bot (Cloud)",
+        "content" => "🚀 **New iPhone listing found on OLX!**",
+        "username" => "OLX Sniper Bot",
         "embeds" => [[
-            "title" => $listing['title'],
-            "url" => $listing['url'],
-            "description" => "💰 **Price:** " . $listing['price'] . "\n\n🔗 **Click the title above to view the offer!**",
-            "color" => 3066993, // Green color for new listings
+            "title" => $title ?: "iPhone Listing",
+            "url" => $url,
+            "description" => "💰 **Price:** " . ($price ?: "Price not available") . "\n\n🔗 **Click the title above to view the offer!**",
+            "color" => 3066993, // Green color
             "timestamp" => date('c'),
             "footer" => [
-                "text" => "OLX Sniper Bot (Cloud) • Click title to open offer"
+                "text" => "OLX Sniper Bot • Click title to open offer"
             ],
             "fields" => [
                 [
                     "name" => "💰 Price",
-                    "value" => $listing['price'],
+                    "value" => $price ?: "Not available",
                     "inline" => true
                 ],
                 [
                     "name" => "🔗 Direct Link",
-                    "value" => "[Open on OLX](" . $listing['url'] . ")",
+                    "value" => "[Open on OLX](" . $url . ")",
                     "inline" => true
                 ]
             ]
         ]]
     ];
 
-    // Add image if available
-    if (!empty($listing['img'])) {
-        $data['embeds'][0]['image'] = ['url' => $listing['img']];
+    // Add image if available and valid
+    if (!empty($listing['img']) && filter_var($listing['img'], FILTER_VALIDATE_URL)) {
         $data['embeds'][0]['thumbnail'] = ['url' => $listing['img']];
     }
 
