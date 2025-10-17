@@ -132,7 +132,7 @@ function fetchListings(Client $client, string $url): array {
     return array_values($unique);
 }
 
-// Send to Discord webhook
+// Send to Discord webhook with retry logic
 function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
     $data = [
         "content" => "🚀 **New listing found on OLX!**",
@@ -167,25 +167,45 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
         $data['embeds'][0]['thumbnail'] = ['url' => $listing['img']];
     }
 
-    $options = [
-        "http" => [
-            "header"  => "Content-Type: application/json",
-            "method"  => "POST",
-            "content" => json_encode($data),
-        ],
-    ];
+    // Retry logic for rate limiting
+    $maxRetries = 3;
+    $retryDelay = 5; // seconds
     
-    $context = stream_context_create($options);
-    $result = file_get_contents($webhookUrl, false, $context);
+    for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+        $options = [
+            "http" => [
+                "header"  => "Content-Type: application/json",
+                "method"  => "POST",
+                "content" => json_encode($data),
+                "timeout" => 30
+            ],
+        ];
+        
+        $context = stream_context_create($options);
+        $result = file_get_contents($webhookUrl, false, $context);
 
-    if ($result === FALSE) {
+        if ($result !== FALSE) {
+            error_log("✅ Sent notification for: {$listing['title']}");
+            return true;
+        }
+        
         $error = error_get_last();
-        error_log("Error sending webhook for listing {$listing['id']}: " . ($error['message'] ?? 'Unknown error'));
-        return false;
-    } else {
-        error_log("✅ Sent notification for: {$listing['title']}");
-        return true;
+        $errorMsg = $error['message'] ?? 'Unknown error';
+        
+        // Check if it's a rate limit error
+        if (strpos($errorMsg, '429') !== false) {
+            error_log("Rate limited, waiting {$retryDelay}s before retry {$attempt}/{$maxRetries} for listing {$listing['id']}");
+            sleep($retryDelay);
+            $retryDelay *= 2; // Exponential backoff
+            continue;
+        }
+        
+        // For other errors, log and break
+        error_log("Error sending webhook for listing {$listing['id']} (attempt {$attempt}): {$errorMsg}");
+        break;
     }
+    
+    return false;
 }
 
 // Health check endpoint
@@ -229,7 +249,7 @@ while (true) {
                         saveSeen($seen, $seenFile);
                         
                         // Longer pause between posts to avoid Discord rate limits
-                        sleep(3);
+                        sleep(5);
                     } else {
                         error_log("[" . date('c') . "] Failed to notify Discord for {$listing['id']}");
                     }
