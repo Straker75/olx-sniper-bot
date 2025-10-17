@@ -1,67 +1,29 @@
-# Use official PHP image with Apache
-FROM php:8.2-apache
+# Use Python 3.11
+FROM python:3.11-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    zip \
-    unzip \
-    sqlite3 \
-    libsqlite3-dev \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
-RUN docker-php-ext-install pdo pdo_sqlite mbstring exif pcntl bcmath gd
-
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
 # Set working directory
-WORKDIR /var/www/html
+WORKDIR /app
 
-# Copy composer files
-COPY composer.json composer.lock ./
+# Copy requirements first for better caching
+COPY requirements.txt .
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY . .
 
-# Create necessary directories and set permissions
-RUN mkdir -p /var/www/html/data && \
-    chown -R www-data:www-data /var/www/html && \
-    chmod -R 755 /var/www/html
+# Set permissions
+RUN chmod +x sniperbot.py app.py
 
-# Create a startup script
-RUN echo '#!/bin/bash\n\
-# Get port from environment or use default\n\
-PORT=${PORT:-8080}\n\
-\n\
-# Start the bot in background\n\
-php sniperbot_cloud.php &\n\
-BOT_PID=$!\n\
-\n\
-# Start PHP built-in server in foreground\n\
-php -S 0.0.0.0:$PORT -t . &\n\
-SERVER_PID=$!\n\
-\n\
-# Wait for either process to exit\n\
-wait -n\n\
-\n\
-# If server exits, kill the bot\n\
-kill $BOT_PID 2>/dev/null\n\
-\n\
-# If bot exits, kill server\n\
-kill $SERVER_PID 2>/dev/null\n\
-' > /start.sh && chmod +x /start.sh
-
-# Expose port 8080
+# Expose port
 EXPOSE 8080
 
-# Use the startup script
-CMD ["/start.sh"]
+# Start the application
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "2", "app:app"]
