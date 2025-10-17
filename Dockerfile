@@ -40,21 +40,21 @@ RUN mkdir -p /var/www/html/data && \
 # Create a startup script
 RUN echo '#!/bin/bash\n\
 # Start the bot in background\n\
-php sniperbot_webhook.php &\n\
+php sniperbot_cloud.php &\n\
 BOT_PID=$!\n\
 \n\
-# Start Apache in foreground\n\
-apache2-foreground &\n\
-APACHE_PID=$!\n\
+# Start PHP built-in server in foreground\n\
+php -S 0.0.0.0:8080 -t . &\n\
+SERVER_PID=$!\n\
 \n\
 # Wait for either process to exit\n\
 wait -n\n\
 \n\
-# If Apache exits, kill the bot\n\
+# If server exits, kill the bot\n\
 kill $BOT_PID 2>/dev/null\n\
 \n\
-# If bot exits, kill Apache\n\
-kill $APACHE_PID 2>/dev/null\n\
+# If bot exits, kill server\n\
+kill $SERVER_PID 2>/dev/null\n\
 ' > /start.sh && chmod +x /start.sh
 
 # Expose port 8080
