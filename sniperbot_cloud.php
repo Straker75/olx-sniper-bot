@@ -80,8 +80,14 @@ function fetchListings(Client $client, string $url): array {
         // Title - try multiple selectors for OLX
         $title = '';
         try {
-            // Try different title selectors
-            $titleSelectors = ['h6', 'h3', 'h4', '.css-16v5mdi', '.css-1oarkqv', '[data-cy="l-card-title"]', '.offer-title'];
+            // Try different title selectors - updated for current OLX structure
+            $titleSelectors = [
+                'h6', 'h3', 'h4', 
+                '.css-16v5mdi', '.css-1oarkqv', '[data-cy="l-card-title"]', 
+                '.offer-title', '.css-1u2vqda', '.css-1bafgv4',
+                'a[data-cy="listing-ad-title"]', 'h6[data-cy="listing-ad-title"]',
+                '.css-1u2vqda h6', '.css-1bafgv4 h6'
+            ];
             foreach ($titleSelectors as $selector) {
                 $titleNode = $node->filter($selector)->first();
                 if ($titleNode->count()) {
@@ -112,12 +118,15 @@ function fetchListings(Client $client, string $url): array {
         // Price - try multiple selectors for OLX
         $price = '';
         try {
-            // Try different price selectors - expanded list
+            // Try different price selectors - updated for current OLX structure
             $priceSelectors = [
                 '.price', '.offer-price', '.css-1oarkqv', '[data-cy="l-card-price"]', 
                 '.css-10b0gli', '.css-1sw7q4x', '.css-1u2vqda', '.css-1bafgv4',
-                'span[data-testid="ad-price"]', '.css-1bafgv4', '.css-1u2vqda',
-                'p.css-1bafgv4', 'span.css-1bafgv4', 'div.css-1bafgv4'
+                'span[data-testid="ad-price"]', 'p[data-testid="ad-price"]',
+                '.css-1bafgv4', '.css-1u2vqda', 'p.css-1bafgv4', 'span.css-1bafgv4', 
+                'div.css-1bafgv4', '.css-1bafgv4 p', '.css-1bafgv4 span',
+                // Look for price patterns in text
+                '*:contains("zł")', '*:contains("PLN")', '*:contains("€")'
             ];
             foreach ($priceSelectors as $selector) {
                 $priceNode = $node->filter($selector)->first();
@@ -179,12 +188,14 @@ function fetchListings(Client $client, string $url): array {
         // Location - try to extract from OLX listing
         $location = '';
         try {
-            // Try different location selectors for OLX - expanded list
+            // Try different location selectors for OLX - updated for current structure
             $locationSelectors = [
                 '.css-veheph', '.css-17o22yg', '.css-1a4brun', '[data-cy="l-card-location"]', 
                 '.location', '.offer-location', '.css-1u2vqda', '.css-1bafgv4',
                 'p[data-testid="location-date"]', 'span[data-testid="location-date"]',
-                '.css-1u2vqda', 'p.css-1u2vqda', 'span.css-1u2vqda'
+                '.css-1u2vqda', 'p.css-1u2vqda', 'span.css-1u2vqda',
+                // Look for location-date patterns like "Brzesko - Dzisiaj o 10:32"
+                '*:contains(" - ")', '*:contains("Dzisiaj")', '*:contains("Wczoraj")'
             ];
             foreach ($locationSelectors as $selector) {
                 $locationNode = $node->filter($selector)->first();
@@ -213,8 +224,12 @@ function fetchListings(Client $client, string $url): array {
             // Last resort: extract location from raw HTML
             if (!$location) {
                 $html = $node->html();
-                // Look for common Polish city patterns
-                if (preg_match('/(Warszawa|Kraków|Gdańsk|Wrocław|Poznań|Łódź|Szczecin|Bydgoszcz|Lublin|Katowice|Białystok|Gdynia|Częstochowa|Radom|Sosnowiec|Toruń|Kielce|Gliwice|Zabrze|Bytom|Olsztyn|Bielsko-Biała|Rzeszów|Ruda Śląska|Rybnik|Tychy|Dąbrowa Górnicza|Płock|Elbląg|Opole|Gorzów Wielkopolski|Włocławek|Zielona Góra|Tarnów|Chorzów|Kalisz|Koszalin|Legnica|Grudziądz|Słupsk|Jaworzno|Jastrzębie-Zdrój|Jelenia Góra|Nowy Sącz|Jelenia Góra|Konin|Piotrków Trybunalski|Lubin|Inowrocław|Ostrów Wielkopolski|Stargard|Mysłowice|Piła|Ostrowiec Świętokrzyski|Siedlce|Mielec|Oława|Gniezno|Głogów|Swarzędz|Tarnobrzeg|Żory|Pruszków|Racibórz|Świętochłowice|Zawiercie|Starachowice|Skierniewice|Kutno|Otwock|Żywiec|Wejherowo|Zgierz|Będzin|Pabianice|Rumia|Świdnica|Żyrardów|Kraśnik|Mikołów|Łomża|Żagań|Świnoujście|Kołobrzeg|Ostrołęka|Stalowa Wola|Myszków|Łuków|Grodzisk Mazowiecki|Skarżysko-Kamienna|Jarocin|Krotoszyn|Zduńska Wola|Śrem|Kłodzko|Nowa Sól|Środa Wielkopolska|Gostyń|Rawicz|Kępno|Ostrzeszów|Jarocin|Krotoszyn|Zduńska Wola|Śrem|Kłodzko|Nowa Sól|Środa Wielkopolska|Gostyń|Rawicz|Kępno|Ostrzeszów)/i', $html, $matches)) {
+                // Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
+                if (preg_match('/([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})/i', $html, $matches)) {
+                    $location = trim($matches[1]);
+                }
+                // If still no location, look for common Polish city patterns
+                else if (preg_match('/(Warszawa|Kraków|Gdańsk|Wrocław|Poznań|Łódź|Szczecin|Bydgoszcz|Lublin|Katowice|Białystok|Gdynia|Częstochowa|Radom|Sosnowiec|Toruń|Kielce|Gliwice|Zabrze|Bytom|Olsztyn|Bielsko-Biała|Rzeszów|Ruda Śląska|Rybnik|Tychy|Dąbrowa Górnicza|Płock|Elbląg|Opole|Gorzów Wielkopolski|Włocławek|Zielona Góra|Tarnów|Chorzów|Kalisz|Koszalin|Legnica|Grudziądz|Słupsk|Jaworzno|Jastrzębie-Zdrój|Jelenia Góra|Nowy Sącz|Konin|Piotrków Trybunalski|Lubin|Inowrocław|Ostrów Wielkopolski|Stargard|Mysłowice|Piła|Ostrowiec Świętokrzyski|Siedlce|Mielec|Oława|Gniezno|Głogów|Swarzędz|Tarnobrzeg|Żory|Pruszków|Racibórz|Świętochłowice|Zawiercie|Starachowice|Skierniewice|Kutno|Otwock|Żywiec|Wejherowo|Zgierz|Będzin|Pabianice|Rumia|Świdnica|Żyrardów|Kraśnik|Mikołów|Łomża|Żagań|Świnoujście|Kołobrzeg|Ostrołęka|Stalowa Wola|Myszków|Łuków|Grodzisk Mazowiecki|Skarżysko-Kamienna|Jarocin|Krotoszyn|Zduńska Wola|Śrem|Kłodzko|Nowa Sól|Środa Wielkopolska|Gostyń|Rawicz|Kępno|Ostrzeszów|Brzesko)/i', $html, $matches)) {
                     $location = $matches[1];
                 }
             }
@@ -230,12 +245,21 @@ function fetchListings(Client $client, string $url): array {
         // Image - try multiple selectors and attributes
         $img = null;
         try {
-            // Try different image selectors
-            $imgSelectors = ['img', '.css-1bmvjcs img', '.css-1bmvjcs', 'img[data-src]', 'img[src]'];
+            // Try different image selectors - updated for current OLX structure
+            $imgSelectors = [
+                'img', 
+                '.css-1bmvjcs img', '.css-1bmvjcs', 
+                'img[data-src]', 'img[src]', 'img[data-lazy-src]',
+                '.css-1bmvjcs img[src]', '.css-1bmvjcs img[data-src]',
+                '[data-testid="listing-image"] img', '[data-testid="listing-image"]',
+                '.css-1bmvjcs img[data-lazy-src]', 'img[data-lazy-src]',
+                // Look for any img in the listing card
+                'a img', '.css-1bmvjcs a img', 'div img'
+            ];
             foreach ($imgSelectors as $selector) {
                 $imgNode = $node->filter($selector)->first();
                 if ($imgNode->count()) {
-                    $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: $imgNode->attr('data-lazy-src') ?: null;
+                    $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: $imgNode->attr('data-lazy-src') ?: $imgNode->attr('data-original') ?: null;
                     if ($img) break;
                 }
             }
@@ -244,10 +268,24 @@ function fetchListings(Client $client, string $url): array {
             if (!$img) {
                 $container = $node->closest('div, article, section');
                 if ($container->count()) {
-                    $imgNode = $container->filter('img')->first();
-                    if ($imgNode->count()) {
-                        $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: $imgNode->attr('data-lazy-src') ?: null;
+                    // Try different container selectors
+                    $containerSelectors = ['img', '.css-1bmvjcs img', 'a img', 'div img'];
+                    foreach ($containerSelectors as $selector) {
+                        $imgNode = $container->filter($selector)->first();
+                        if ($imgNode->count()) {
+                            $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: $imgNode->attr('data-lazy-src') ?: $imgNode->attr('data-original') ?: null;
+                            if ($img) break;
+                        }
                     }
+                }
+            }
+            
+            // Last resort: extract image URL from raw HTML
+            if (!$img) {
+                $html = $node->html();
+                // Look for image URLs in the HTML
+                if (preg_match('/<img[^>]+(?:src|data-src|data-lazy-src)=["\']([^"\']+)["\'][^>]*>/i', $html, $matches)) {
+                    $img = $matches[1];
                 }
             }
             
