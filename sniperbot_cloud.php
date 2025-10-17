@@ -101,6 +101,18 @@ function fetchListings(Client $client, string $url): array {
                 $title = $node->attr('title') ?: trim($node->text());
             }
             
+            // Last resort: try to extract title from URL
+            if (!$title || strlen($title) < 5) {
+                // Extract title from URL like "iphone-12-pro-max-100-baterii-idealny-okazja"
+                if (preg_match('/\/([^\/]+)\.html/', $href, $matches)) {
+                    $urlTitle = $matches[1];
+                    // Convert dashes to spaces and capitalize
+                    $urlTitle = str_replace('-', ' ', $urlTitle);
+                    $urlTitle = ucwords($urlTitle);
+                    $title = $urlTitle;
+                }
+            }
+            
             // Clean up title - remove HTML tags, CSS classes, and extra whitespace
             $title = strip_tags($title);
             $title = preg_replace('/\s+/', ' ', $title);
@@ -304,12 +316,25 @@ function fetchListings(Client $client, string $url): array {
 
         // Comprehensive debug logging
         error_log("=== DEBUG LISTING {$id} ===");
-        error_log("Raw HTML node: " . substr($node->html(), 0, 200) . "...");
+        error_log("Raw HTML node: " . substr($node->html(), 0, 500) . "...");
+        error_log("Node text content: " . substr($node->text(), 0, 200) . "...");
         error_log("Extracted Title: '{$title}'");
         error_log("Extracted Price: '{$price}'");
         error_log("Extracted Location: '{$location}'");
         error_log("Extracted Image: '{$img}'");
         error_log("Extracted URL: '{$href}'");
+        
+        // Test each selector individually
+        error_log("--- TESTING SELECTORS ---");
+        foreach (['h6', 'h3', 'h4', '.css-16v5mdi', '.css-1oarkqv', '[data-cy="l-card-title"]'] as $selector) {
+            $testNode = $node->filter($selector)->first();
+            if ($testNode->count()) {
+                error_log("Selector '{$selector}' found: '" . trim($testNode->text()) . "'");
+            } else {
+                error_log("Selector '{$selector}' not found");
+            }
+        }
+        
         error_log("Final listing data: " . json_encode([
             'id' => $id,
             'title' => $title ?: 'No title',
