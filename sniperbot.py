@@ -147,6 +147,18 @@ class OLXSniperBot:
                 price = self.extract_price(container)
                 location = self.extract_location(container)
                 image = self.extract_image(container)
+                publish_date = self.extract_publish_date(container)
+                
+                # Debug logging for image extraction
+                if not image:
+                    logger.debug(f"No image found for listing: {title}")
+                    # Log container HTML for debugging
+                    logger.debug(f"Container HTML: {str(container)[:200]}...")
+                
+                # Only include offers from today
+                if not self.is_today_offer(publish_date):
+                    logger.debug(f"Skipping offer from {publish_date}: {title}")
+                    continue
                 
                 listing = {
                     'id': listing_id,
@@ -154,11 +166,12 @@ class OLXSniperBot:
                     'url': href,
                     'price': price or 'Cena do uzgodnienia',
                     'location': location or 'Brak',
-                    'image': image
+                    'image': image,
+                    'publish_date': publish_date
                 }
                 
                 listings.append(listing)
-                logger.info(f"Found listing: {title} - {price} - {location}")
+                logger.info(f"Found TODAY'S listing: {title} - {price} - {location} - {publish_date}")
             
             # Remove duplicates
             unique_listings = []
@@ -168,7 +181,7 @@ class OLXSniperBot:
                     unique_listings.append(listing)
                     seen_ids.add(listing['id'])
             
-            logger.info(f"Found {len(unique_listings)} unique listings")
+            logger.info(f"Found {len(unique_listings)} unique TODAY'S listings (filtered out old offers)")
             return unique_listings
             
         except Exception as e:
@@ -332,12 +345,8 @@ class OLXSniperBot:
                             else:
                                 src = base_url
                         
-                        # Validate URL and check if it's a real image
-                        if (src.startswith('http') and 
-                            not src.endswith('.svg') and 
-                            not 'placeholder' in src.lower() and
-                            not 'default' in src.lower()):
-                            
+                        # More lenient validation - just check if it's a valid URL
+                        if src.startswith('http'):
                             logger.debug(f"Found image with selector '{selector}': {src}")
                             return src
             
@@ -355,15 +364,90 @@ class OLXSniperBot:
                             src = urljoin('https://www.olx.pl', src)
                         if '?' in src:
                             src = src.split('?')[0]
-                        if (src.startswith('http') and 
-                            not src.endswith('.svg') and 
-                            not 'placeholder' in src.lower()):
+                        if src.startswith('http'):
                             logger.debug(f"Found image in parent: {src}")
+                            return src
+            
+            # Try grandparent elements too
+            grandparent = element.parent.parent if element.parent else None
+            if grandparent:
+                img = grandparent.find('img')
+                if img:
+                    src = (img.get('data-src') or 
+                           img.get('data-lazy-src') or 
+                           img.get('data-original') or 
+                           img.get('src'))
+                    if src:
+                        if src.startswith('/'):
+                            src = urljoin('https://www.olx.pl', src)
+                        if '?' in src:
+                            src = src.split('?')[0]
+                        if src.startswith('http'):
+                            logger.debug(f"Found image in grandparent: {src}")
                             return src
                             
         except Exception as e:
             logger.debug(f"Error extracting image: {e}")
         return None
+    
+    def extract_publish_date(self, element):
+        """Extract publish date from listing element"""
+        try:
+            # Look for date in specific elements first
+            date_selectors = [
+                'p[data-testid="location-date"]',
+                'span[data-testid="location-date"]',
+                '.css-veheph',
+                '.css-17o22yg',
+                '.css-1a4brun',
+                '[class*="date"]',
+                '[class*="time"]'
+            ]
+            
+            for selector in date_selectors:
+                date_elem = element.select_one(selector)
+                if date_elem:
+                    date_text = date_elem.get_text().strip()
+                    # Look for date patterns like "Dzisiaj o 10:32", "Wczoraj o 15:20", "17.10.2024"
+                    date_match = re.search(r'(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', date_text)
+                    if date_match:
+                        logger.debug(f"Found date with selector '{selector}': {date_match.group(1)}")
+                        return date_match.group(1)
+            
+            # Look for date patterns in all text
+            text = element.get_text()
+            date_match = re.search(r'(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', text)
+            if date_match:
+                logger.debug(f"Found date in text: {date_match.group(1)}")
+                return date_match.group(1)
+                
+        except Exception as e:
+            logger.debug(f"Error extracting publish date: {e}")
+        return None
+    
+    def is_today_offer(self, date_str):
+        """Check if the offer is from today"""
+        if not date_str:
+            return False
+        
+        try:
+            # Check for "Dzisiaj" (Today)
+            if 'Dzisiaj' in date_str:
+                return True
+            
+            # Check for specific date format (DD.MM.YYYY)
+            if re.match(r'\d{1,2}\.\d{1,2}\.\d{4}', date_str):
+                from datetime import datetime
+                today = datetime.now()
+                offer_date = datetime.strptime(date_str, '%d.%m.%Y')
+                return offer_date.date() == today.date()
+            
+            # Skip "Wczoraj" (Yesterday) and other dates
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error checking if offer is from today: {e}")
+            return False
     
     def send_discord_notification(self, listing):
         """Send Discord webhook notification"""
@@ -374,7 +458,7 @@ class OLXSniperBot:
                 "url": listing['url'],
                 "color": 3066993,  # Green color
                 "timestamp": datetime.utcnow().isoformat() + 'Z',
-                "description": f"📌 {listing['title']}\n💰 Cena: {listing['price']}\n📍 Lokalizacja: {listing['location']}\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia"
+                "description": f"📌 {listing['title']}\n💰 Cena: {listing['price']}\n📍 Lokalizacja: {listing['location']}\n📅 Data: {listing.get('publish_date', 'Dzisiaj')}"
             }
             
             # Add thumbnail if image available
