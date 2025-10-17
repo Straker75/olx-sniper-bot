@@ -90,17 +90,42 @@ class OLXSniperBot:
             soup = BeautifulSoup(response.content, 'html.parser')
             listings = []
             
-            # Find listing containers instead of just links
-            # Look for common OLX listing container patterns
-            listing_containers = soup.find_all(['div', 'article'], class_=lambda x: x and any(
-                keyword in x.lower() for keyword in ['css-', 'listing', 'offer', 'card']
-            ))
+            # Find listing containers - look for containers that have offer links
+            listing_containers = []
             
-            logger.info(f"Found {len(listing_containers)} potential listing containers")
+            # First, find all offer links
+            offer_links = soup.find_all('a', href=True)
+            offer_links = [link for link in offer_links if '/oferta/' in link.get('href', '')]
+            
+            logger.info(f"Found {len(offer_links)} offer links")
+            
+            for link in offer_links:
+                # Find the container that contains this link
+                container = link
+                # Go up the DOM tree to find a suitable container
+                for _ in range(5):  # Limit search depth
+                    container = container.parent
+                    if not container:
+                        break
+                    
+                    # Check if this container looks like a listing container
+                    container_class = container.get('class', [])
+                    container_class_str = ' '.join(container_class).lower()
+                    
+                    if any(keyword in container_class_str for keyword in ['css-', 'listing', 'offer', 'card', 'item']):
+                        if container not in listing_containers:
+                            listing_containers.append(container)
+                        break
+                else:
+                    # If no suitable container found, use the link itself
+                    if link not in listing_containers:
+                        listing_containers.append(link)
+            
+            logger.info(f"Found {len(listing_containers)} listing containers")
             
             for container in listing_containers:
                 # Find the main link in this container
-                link = container.find('a', href=True)
+                link = container.find('a', href=True) if container.name != 'a' else container
                 if not link or '/oferta/' not in link.get('href', ''):
                     continue
                 
@@ -269,57 +294,73 @@ class OLXSniperBot:
     def extract_image(self, element):
         """Extract image URL from listing element"""
         try:
-            # Look for images in specific elements first
+            # Look for images in specific elements first - prioritize data attributes
             image_selectors = [
                 'img[data-src]',
-                'img[src]',
-                'img[data-lazy-src]',
+                'img[data-lazy-src]', 
                 'img[data-original]',
+                'img[src]',
                 '.css-1bmvjcs img',
                 '[class*="image"] img',
                 '[class*="photo"] img',
-                '[class*="thumbnail"] img'
+                '[class*="thumbnail"] img',
+                'img'
             ]
             
             for selector in image_selectors:
-                img_elem = element.select_one(selector)
-                if img_elem:
-                    src = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-lazy-src') or img_elem.get('data-original')
+                img_elements = element.select(selector)
+                for img_elem in img_elements:
+                    # Try multiple attributes in order of preference
+                    src = (img_elem.get('data-src') or 
+                           img_elem.get('data-lazy-src') or 
+                           img_elem.get('data-original') or 
+                           img_elem.get('src'))
+                    
                     if src:
+                        # Clean and validate the URL
                         if src.startswith('/'):
                             src = urljoin('https://www.olx.pl', src)
-                        # Remove query parameters that might break the URL
-                        src = src.split('?')[0]
-                        # Validate URL
-                        if src.startswith('http') and not src.endswith('.svg'):
+                        
+                        # Remove query parameters but keep the image ID
+                        if '?' in src:
+                            base_url = src.split('?')[0]
+                            # Try to preserve image ID from query params
+                            query_params = src.split('?')[1]
+                            if 'id=' in query_params:
+                                img_id = query_params.split('id=')[1].split('&')[0]
+                                src = f"{base_url}?id={img_id}"
+                            else:
+                                src = base_url
+                        
+                        # Validate URL and check if it's a real image
+                        if (src.startswith('http') and 
+                            not src.endswith('.svg') and 
+                            not 'placeholder' in src.lower() and
+                            not 'default' in src.lower()):
+                            
                             logger.debug(f"Found image with selector '{selector}': {src}")
                             return src
             
-            # Look for any img in the element
-            img = element.find('img')
-            if img:
-                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
-                if src:
-                    if src.startswith('/'):
-                        src = urljoin('https://www.olx.pl', src)
-                    src = src.split('?')[0]
-                    if src.startswith('http') and not src.endswith('.svg'):
-                        logger.debug(f"Found image: {src}")
-                        return src
-            
-            # Look in parent elements
+            # If no image found in the element, try parent elements
             parent = element.parent
             if parent:
                 img = parent.find('img')
                 if img:
-                    src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
+                    src = (img.get('data-src') or 
+                           img.get('data-lazy-src') or 
+                           img.get('data-original') or 
+                           img.get('src'))
                     if src:
                         if src.startswith('/'):
                             src = urljoin('https://www.olx.pl', src)
-                        src = src.split('?')[0]
-                        if src.startswith('http') and not src.endswith('.svg'):
+                        if '?' in src:
+                            src = src.split('?')[0]
+                        if (src.startswith('http') and 
+                            not src.endswith('.svg') and 
+                            not 'placeholder' in src.lower()):
                             logger.debug(f"Found image in parent: {src}")
                             return src
+                            
         except Exception as e:
             logger.debug(f"Error extracting image: {e}")
         return None
