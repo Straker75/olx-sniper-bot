@@ -90,15 +90,21 @@ class OLXSniperBot:
             soup = BeautifulSoup(response.content, 'html.parser')
             listings = []
             
-            # Find all listing links
-            listing_links = soup.find_all('a', href=True)
+            # Find listing containers instead of just links
+            # Look for common OLX listing container patterns
+            listing_containers = soup.find_all(['div', 'article'], class_=lambda x: x and any(
+                keyword in x.lower() for keyword in ['css-', 'listing', 'offer', 'card']
+            ))
             
-            for link in listing_links:
-                href = link.get('href')
-                if not href or '/oferta/' not in href:
+            logger.info(f"Found {len(listing_containers)} potential listing containers")
+            
+            for container in listing_containers:
+                # Find the main link in this container
+                link = container.find('a', href=True)
+                if not link or '/oferta/' not in link.get('href', ''):
                     continue
                 
-                # Make URL absolute
+                href = link.get('href')
                 if href.startswith('/'):
                     href = urljoin('https://www.olx.pl', href)
                 
@@ -112,10 +118,10 @@ class OLXSniperBot:
                 if not title:
                     title = "iPhone na OLX"
                 
-                # Try to extract price and location from the link's context
-                price = self.extract_price(link)
-                location = self.extract_location(link)
-                image = self.extract_image(link)
+                # Extract data from the container (better context)
+                price = self.extract_price(container)
+                location = self.extract_location(container)
+                image = self.extract_image(container)
                 
                 listing = {
                     'id': listing_id,
@@ -127,7 +133,7 @@ class OLXSniperBot:
                 }
                 
                 listings.append(listing)
-                logger.debug(f"Found listing: {title} - {price} - {location}")
+                logger.info(f"Found listing: {title} - {price} - {location}")
             
             # Remove duplicates
             unique_listings = []
@@ -159,10 +165,32 @@ class OLXSniperBot:
     def extract_price(self, element):
         """Extract price from listing element"""
         try:
-            # Look for price patterns in text
+            # Look for price in specific elements first
+            price_selectors = [
+                'span[data-testid="ad-price"]',
+                'p[data-testid="ad-price"]',
+                '.css-1bafgv4',
+                '.css-1u2vqda',
+                '.price',
+                '.offer-price',
+                '[class*="price"]',
+                '[class*="cost"]'
+            ]
+            
+            for selector in price_selectors:
+                price_elem = element.select_one(selector)
+                if price_elem:
+                    price_text = price_elem.get_text().strip()
+                    price_match = re.search(r'(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))', price_text)
+                    if price_match:
+                        logger.debug(f"Found price with selector '{selector}': {price_match.group(1)}")
+                        return price_match.group(1)
+            
+            # Look for price patterns in all text
             text = element.get_text()
             price_match = re.search(r'(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))', text)
             if price_match:
+                logger.debug(f"Found price in text: {price_match.group(1)}")
                 return price_match.group(1)
             
             # Look in parent elements
@@ -171,7 +199,9 @@ class OLXSniperBot:
                 parent_text = parent.get_text()
                 price_match = re.search(r'(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))', parent_text)
                 if price_match:
+                    logger.debug(f"Found price in parent: {price_match.group(1)}")
                     return price_match.group(1)
+                    
         except Exception as e:
             logger.debug(f"Error extracting price: {e}")
         return None
@@ -179,11 +209,33 @@ class OLXSniperBot:
     def extract_location(self, element):
         """Extract location from listing element"""
         try:
-            # Look for location patterns in text
+            # Look for location in specific elements first
+            location_selectors = [
+                'p[data-testid="location-date"]',
+                'span[data-testid="location-date"]',
+                '.css-veheph',
+                '.css-17o22yg',
+                '.css-1a4brun',
+                '[class*="location"]',
+                '[class*="city"]'
+            ]
+            
+            for selector in location_selectors:
+                location_elem = element.select_one(selector)
+                if location_elem:
+                    location_text = location_elem.get_text().strip()
+                    # Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
+                    location_match = re.search(r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', location_text)
+                    if location_match:
+                        logger.debug(f"Found location with selector '{selector}': {location_match.group(1)}")
+                        return location_match.group(1).strip()
+            
+            # Look for location patterns in all text
             text = element.get_text()
             # Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
             location_match = re.search(r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', text)
             if location_match:
+                logger.debug(f"Found location in text: {location_match.group(1)}")
                 return location_match.group(1).strip()
             
             # Look for common Polish cities
@@ -208,6 +260,7 @@ class OLXSniperBot:
             
             for city in cities:
                 if city.lower() in text.lower():
+                    logger.debug(f"Found city in text: {city}")
                     return city
         except Exception as e:
             logger.debug(f"Error extracting location: {e}")
@@ -216,25 +269,57 @@ class OLXSniperBot:
     def extract_image(self, element):
         """Extract image URL from listing element"""
         try:
-            # Look for images in the element
+            # Look for images in specific elements first
+            image_selectors = [
+                'img[data-src]',
+                'img[src]',
+                'img[data-lazy-src]',
+                'img[data-original]',
+                '.css-1bmvjcs img',
+                '[class*="image"] img',
+                '[class*="photo"] img',
+                '[class*="thumbnail"] img'
+            ]
+            
+            for selector in image_selectors:
+                img_elem = element.select_one(selector)
+                if img_elem:
+                    src = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-lazy-src') or img_elem.get('data-original')
+                    if src:
+                        if src.startswith('/'):
+                            src = urljoin('https://www.olx.pl', src)
+                        # Remove query parameters that might break the URL
+                        src = src.split('?')[0]
+                        # Validate URL
+                        if src.startswith('http') and not src.endswith('.svg'):
+                            logger.debug(f"Found image with selector '{selector}': {src}")
+                            return src
+            
+            # Look for any img in the element
             img = element.find('img')
             if img:
-                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
                 if src:
                     if src.startswith('/'):
                         src = urljoin('https://www.olx.pl', src)
-                    return src
+                    src = src.split('?')[0]
+                    if src.startswith('http') and not src.endswith('.svg'):
+                        logger.debug(f"Found image: {src}")
+                        return src
             
             # Look in parent elements
             parent = element.parent
             if parent:
                 img = parent.find('img')
                 if img:
-                    src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                    src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
                     if src:
                         if src.startswith('/'):
                             src = urljoin('https://www.olx.pl', src)
-                        return src
+                        src = src.split('?')[0]
+                        if src.startswith('http') and not src.endswith('.svg'):
+                            logger.debug(f"Found image in parent: {src}")
+                            return src
         except Exception as e:
             logger.debug(f"Error extracting image: {e}")
         return None
