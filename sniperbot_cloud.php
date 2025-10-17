@@ -102,7 +102,7 @@ function fetchListings(Client $client, string $url): array {
             }
             
             // Last resort: try to extract title from URL
-            if (!$title || strlen($title) < 5) {
+            if (!$title || strlen($title) < 5 || $title === 'Wyrnione') {
                 // Extract title from URL like "iphone-12-pro-max-100-baterii-idealny-okazja"
                 if (preg_match('/\/([^\/]+)\.html/', $href, $matches)) {
                     $urlTitle = $matches[1];
@@ -111,6 +111,11 @@ function fetchListings(Client $client, string $url): array {
                     $urlTitle = ucwords($urlTitle);
                     $title = $urlTitle;
                 }
+            }
+            
+            // If still no good title, use a generic one
+            if (!$title || strlen($title) < 5 || $title === 'Wyrnione') {
+                $title = 'iPhone na OLX';
             }
             
             // Clean up title - remove HTML tags, CSS classes, and extra whitespace
@@ -193,6 +198,16 @@ function fetchListings(Client $client, string $url): array {
             if ($price && !preg_match('/(zł|PLN|€|\$)/i', $price)) {
                 $price .= ' zł';
             }
+            
+            // If still no price, try to extract from URL or use default
+            if (!$price || $price === '—') {
+                // Try to extract price from URL if it contains price info
+                if (preg_match('/(\d+)-zl/', $href, $matches)) {
+                    $price = $matches[1] . ' zł';
+                } else {
+                    $price = 'Cena do uzgodnienia';
+                }
+            }
         } catch (Exception $e) {
             $price = '';
         }
@@ -247,7 +262,7 @@ function fetchListings(Client $client, string $url): array {
             }
             
             // If no location found, use default
-            if (!$location) {
+            if (!$location || $location === 'Brak') {
                 $location = 'Brak';
             }
         } catch (Exception $e) {
@@ -384,7 +399,7 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
         "content" => "",
         "username" => "OLX Sniper Bot",
         "embeds" => [[
-            "title" => "Ogłoszenia - Sprzedam, kupię na OLX.pl",
+            "title" => $title, // Use the actual extracted title
             "url" => $url,
             "color" => 3066993, // Green color
             "timestamp" => date('c'),
