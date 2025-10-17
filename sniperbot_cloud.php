@@ -115,21 +115,22 @@ function fetchListings(Client $client, string $url): array {
                 }
             }
             
-            // Try parent elements for price
+            // Try to find price in the same container (fallback)
             if (!$price) {
                 try {
-                    $parent = $node->parents()->filter('.price, .offer-price')->first();
-                    if ($parent->count()) {
-                        $price = trim($parent->text());
-                    }
-                } catch (Exception $e) {
-                    // Fallback: try to find price in the same container
+                    // Look for price in the same container as the link
                     $container = $node->closest('div, article, section');
                     if ($container->count()) {
                         $priceNode = $container->filter('.price, .offer-price')->first();
                         if ($priceNode->count()) {
                             $price = trim($priceNode->text());
                         }
+                    }
+                } catch (Exception $e) {
+                    // If all else fails, try to extract price from the link text itself
+                    $linkText = trim($node->text());
+                    if (preg_match('/(\d+\s*(?:zł|PLN|€|\$))/i', $linkText, $matches)) {
+                        $price = $matches[1];
                     }
                 }
             }
