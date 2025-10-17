@@ -211,10 +211,23 @@ function fetchListings(Client $client, string $url): array {
             $img = null;
         }
 
-        // Debug logging
-        if (empty($title) || empty($price)) {
-            error_log("Debug - Listing {$id}: Title='{$title}', Price='{$price}', URL='{$href}'");
-        }
+        // Comprehensive debug logging
+        error_log("=== DEBUG LISTING {$id} ===");
+        error_log("Raw HTML node: " . substr($node->html(), 0, 200) . "...");
+        error_log("Extracted Title: '{$title}'");
+        error_log("Extracted Price: '{$price}'");
+        error_log("Extracted Location: '{$location}'");
+        error_log("Extracted Image: '{$img}'");
+        error_log("Extracted URL: '{$href}'");
+        error_log("Final listing data: " . json_encode([
+            'id' => $id,
+            'title' => $title ?: 'No title',
+            'url' => $href,
+            'price' => $price ?: '—',
+            'location' => $location,
+            'img' => $img
+        ], JSON_PRETTY_PRINT));
+        error_log("=== END DEBUG ===");
 
         $listings[] = [
             'id' => $id,
@@ -281,6 +294,12 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
     if (!empty($listing['img']) && filter_var($listing['img'], FILTER_VALIDATE_URL)) {
         $data['embeds'][0]['thumbnail'] = ['url' => $listing['img']];
     }
+
+    // Debug Discord notification data
+    error_log("=== DISCORD NOTIFICATION DEBUG ===");
+    error_log("Listing ID: " . $listing['id']);
+    error_log("Discord payload: " . json_encode($data, JSON_PRETTY_PRINT));
+    error_log("=== END DISCORD DEBUG ===");
 
     // Retry logic for rate limiting
     $maxRetries = 3;
