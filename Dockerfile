@@ -39,12 +39,15 @@ RUN mkdir -p /var/www/html/data && \
 
 # Create a startup script
 RUN echo '#!/bin/bash\n\
+# Get port from environment or use default\n\
+PORT=${PORT:-8080}\n\
+\n\
 # Start the bot in background\n\
 php sniperbot_cloud.php &\n\
 BOT_PID=$!\n\
 \n\
 # Start PHP built-in server in foreground\n\
-php -S 0.0.0.0:8080 -t . &\n\
+php -S 0.0.0.0:$PORT -t . &\n\
 SERVER_PID=$!\n\
 \n\
 # Wait for either process to exit\n\
