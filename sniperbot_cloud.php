@@ -213,29 +213,29 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
     }
     
     $data = [
-        "content" => "🚀 **New iPhone listing found on OLX!**",
+        "content" => "",
         "username" => "OLX Sniper Bot",
         "embeds" => [[
-            "title" => $title ?: "iPhone Listing",
+            "title" => "Ogłoszenia - Sprzedam, kupię na OLX.pl",
             "url" => $url,
-            "description" => "💰 **Price:** " . ($price ?: "Price not available") . "\n\n🔗 **Click the title above to view the offer!**",
             "color" => 3066993, // Green color
             "timestamp" => date('c'),
-            "footer" => [
-                "text" => "OLX Sniper Bot • Click title to open offer"
-            ],
-            "fields" => [
-                [
-                    "name" => "💰 Price",
-                    "value" => $price ?: "Not available",
-                    "inline" => true
-                ],
-                [
-                    "name" => "🔗 Direct Link",
-                    "value" => "[Open on OLX](" . $url . ")",
-                    "inline" => true
-                ]
+            "description" => "📌 " . strtolower($title ?: "iPhone listing") . "\n💰 Cena: " . ($price ?: "Cena do uzgodnienia") . "\n📍 Lokalizacja: Warszawa\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
+            "thumbnail" => [
+                "url" => "https://www.olx.pl/favicon.ico"
             ]
+        ]],
+        "components" => [[
+            "type" => 1,
+            "components" => [[
+                "type" => 2,
+                "style" => 5,
+                "label" => "KUP TERAZ",
+                "url" => $url,
+                "emoji" => [
+                    "name" => "🔗"
+                ]
+            ]]
         ]]
     ];
 
