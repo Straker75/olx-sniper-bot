@@ -179,7 +179,8 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
     $result = file_get_contents($webhookUrl, false, $context);
 
     if ($result === FALSE) {
-        error_log("Error sending webhook for listing {$listing['id']}");
+        $error = error_get_last();
+        error_log("Error sending webhook for listing {$listing['id']}: " . ($error['message'] ?? 'Unknown error'));
         return false;
     } else {
         error_log("✅ Sent notification for: {$listing['title']}");
@@ -227,8 +228,8 @@ while (true) {
                         $seen[] = $listing['id'];
                         saveSeen($seen, $seenFile);
                         
-                        // Brief pause between posts to avoid rate limits
-                        sleep(1);
+                        // Longer pause between posts to avoid Discord rate limits
+                        sleep(3);
                     } else {
                         error_log("[" . date('c') . "] Failed to notify Discord for {$listing['id']}");
                     }
