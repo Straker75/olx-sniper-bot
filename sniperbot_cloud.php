@@ -102,7 +102,7 @@ function fetchListings(Client $client, string $url): array {
             }
             
             // Last resort: try to extract title from URL
-            if (!$title || strlen($title) < 5 || $title === 'Wyrnione') {
+            if (!$title || strlen($title) < 5 || $title === 'Wyrnione' || strpos($title, 'css-') !== false) {
                 // Extract title from URL like "iphone-12-pro-max-100-baterii-idealny-okazja"
                 if (preg_match('/\/([^\/]+)\.html/', $href, $matches)) {
                     $urlTitle = $matches[1];
@@ -110,12 +110,14 @@ function fetchListings(Client $client, string $url): array {
                     $urlTitle = str_replace('-', ' ', $urlTitle);
                     $urlTitle = ucwords($urlTitle);
                     $title = $urlTitle;
+                    error_log("Using URL-based title: '{$title}'");
                 }
             }
             
             // If still no good title, use a generic one
-            if (!$title || strlen($title) < 5 || $title === 'Wyrnione') {
+            if (!$title || strlen($title) < 5 || $title === 'Wyrnione' || strpos($title, 'css-') !== false) {
                 $title = 'iPhone na OLX';
+                error_log("Using fallback title: '{$title}'");
             }
             
             // Clean up title - remove HTML tags, CSS classes, and extra whitespace
@@ -174,8 +176,16 @@ function fetchListings(Client $client, string $url): array {
             // Last resort: extract price from raw HTML
             if (!$price) {
                 $html = $node->html();
+                // Look for price patterns in HTML
                 if (preg_match('/(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))/i', $html, $matches)) {
                     $price = $matches[1];
+                    error_log("Extracted price from HTML: '{$price}'");
+                }
+                // Also try to find price in the full text
+                $fullText = $node->text();
+                if (preg_match('/(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))/i', $fullText, $matches)) {
+                    $price = $matches[1];
+                    error_log("Extracted price from text: '{$price}'");
                 }
             }
                 }
@@ -205,7 +215,7 @@ function fetchListings(Client $client, string $url): array {
                 if (preg_match('/(\d+)-zl/', $href, $matches)) {
                     $price = $matches[1] . ' zł';
                 } else {
-                    $price = 'Cena do uzgodnienia';
+                    $price = '---';
                 }
             }
         } catch (Exception $e) {
@@ -348,6 +358,16 @@ function fetchListings(Client $client, string $url): array {
             } else {
                 error_log("Selector '{$selector}' not found");
             }
+        }
+        
+        // Test URL-based title extraction
+        error_log("--- TESTING URL TITLE EXTRACTION ---");
+        if (preg_match('/\/([^\/]+)\.html/', $href, $matches)) {
+            $urlTitle = $matches[1];
+            error_log("URL title raw: '{$urlTitle}'");
+            $urlTitle = str_replace('-', ' ', $urlTitle);
+            $urlTitle = ucwords($urlTitle);
+            error_log("URL title processed: '{$urlTitle}'");
         }
         
         error_log("Final listing data: " . json_encode([
