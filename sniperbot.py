@@ -152,8 +152,13 @@ class OLXSniperBot:
                 # Debug logging for image extraction
                 if not image:
                     logger.debug(f"No image found for listing: {title}")
-                    # Log container HTML for debugging
-                    logger.debug(f"Container HTML: {str(container)[:200]}...")
+                    # Try alternative image extraction
+                    image = self.extract_image_alternative(container, href)
+                    if image:
+                        logger.debug(f"Found image with alternative method: {image}")
+                    else:
+                        # Log container HTML for debugging
+                        logger.debug(f"Container HTML: {str(container)[:200]}...")
                 
                 # Only include offers from today
                 if not self.is_today_offer(publish_date):
@@ -166,7 +171,7 @@ class OLXSniperBot:
                     'url': href,
                     'price': price or 'Cena do uzgodnienia',
                     'location': location or 'Brak',
-                    'image': image,
+                    'image': image or 'https://via.placeholder.com/300x200/007AFF/FFFFFF?text=iPhone',
                     'publish_date': publish_date
                 }
                 
@@ -388,6 +393,33 @@ class OLXSniperBot:
                             
         except Exception as e:
             logger.debug(f"Error extracting image: {e}")
+        return None
+    
+    def extract_image_alternative(self, element, url):
+        """Alternative image extraction method"""
+        try:
+            # Try to find any img tag in the entire element tree
+            all_imgs = element.find_all('img')
+            for img in all_imgs:
+                src = (img.get('data-src') or 
+                       img.get('data-lazy-src') or 
+                       img.get('data-original') or 
+                       img.get('src'))
+                if src:
+                    if src.startswith('/'):
+                        src = urljoin('https://www.olx.pl', src)
+                    if src.startswith('http'):
+                        logger.debug(f"Alternative method found image: {src}")
+                        return src
+            
+            # Try to extract from the offer URL itself (sometimes images are in the URL structure)
+            if '/oferta/' in url:
+                # This is a fallback - sometimes OLX has predictable image URLs
+                # But we'll skip this for now as it's not reliable
+                pass
+                
+        except Exception as e:
+            logger.debug(f"Error in alternative image extraction: {e}")
         return None
     
     def extract_publish_date(self, element):
