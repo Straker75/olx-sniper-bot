@@ -103,9 +103,12 @@ function fetchListings(Client $client, string $url): array {
             
             // Last resort: try to extract title from URL
             if (!$title || strlen($title) < 5 || $title === 'Wyrnione' || strpos($title, 'css-') !== false) {
-                // Extract title from URL like "iphone-12-pro-max-100-baterii-idealny-okazja"
-                if (preg_match('/\/([^\/]+)\.html/', $href, $matches)) {
+                // Extract title from URL like "iphone-13-stan-bardzo-dobry-CID99-ID17SUtt.html"
+                // Pattern: /oferta/[TITLE]-CID99-ID[ID].html
+                if (preg_match('/\/oferta\/([^-]+-CID99-ID[^-]+)\.html/', $href, $matches)) {
                     $urlTitle = $matches[1];
+                    // Remove the -CID99-ID[ID] part, keep only the title
+                    $urlTitle = preg_replace('/-CID99-ID[^-]+$/', '', $urlTitle);
                     // Convert dashes to spaces and capitalize
                     $urlTitle = str_replace('-', ' ', $urlTitle);
                     $urlTitle = ucwords($urlTitle);
@@ -362,12 +365,18 @@ function fetchListings(Client $client, string $url): array {
         
         // Test URL-based title extraction
         error_log("--- TESTING URL TITLE EXTRACTION ---");
-        if (preg_match('/\/([^\/]+)\.html/', $href, $matches)) {
+        error_log("Full URL: '{$href}'");
+        if (preg_match('/\/oferta\/([^-]+-CID99-ID[^-]+)\.html/', $href, $matches)) {
             $urlTitle = $matches[1];
             error_log("URL title raw: '{$urlTitle}'");
+            // Remove the -CID99-ID[ID] part, keep only the title
+            $urlTitle = preg_replace('/-CID99-ID[^-]+$/', '', $urlTitle);
+            error_log("URL title after CID99 removal: '{$urlTitle}'");
             $urlTitle = str_replace('-', ' ', $urlTitle);
             $urlTitle = ucwords($urlTitle);
             error_log("URL title processed: '{$urlTitle}'");
+        } else {
+            error_log("URL pattern did not match");
         }
         
         error_log("Final listing data: " . json_encode([
