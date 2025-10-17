@@ -112,8 +112,13 @@ function fetchListings(Client $client, string $url): array {
         // Price - try multiple selectors for OLX
         $price = '';
         try {
-            // Try different price selectors
-            $priceSelectors = ['.price', '.offer-price', '.css-1oarkqv', '[data-cy="l-card-price"]', '.css-10b0gli', '.css-1sw7q4x'];
+            // Try different price selectors - expanded list
+            $priceSelectors = [
+                '.price', '.offer-price', '.css-1oarkqv', '[data-cy="l-card-price"]', 
+                '.css-10b0gli', '.css-1sw7q4x', '.css-1u2vqda', '.css-1bafgv4',
+                'span[data-testid="ad-price"]', '.css-1bafgv4', '.css-1u2vqda',
+                'p.css-1bafgv4', 'span.css-1bafgv4', 'div.css-1bafgv4'
+            ];
             foreach ($priceSelectors as $selector) {
                 $priceNode = $node->filter($selector)->first();
                 if ($priceNode->count()) {
@@ -134,11 +139,19 @@ function fetchListings(Client $client, string $url): array {
                         }
                     }
                 } catch (Exception $e) {
-                    // If all else fails, try to extract price from the link text itself
-                    $linkText = trim($node->text());
-                    if (preg_match('/(\d+\s*(?:zł|PLN|€|\$))/i', $linkText, $matches)) {
-                        $price = $matches[1];
-                    }
+            // If all else fails, try to extract price from the link text itself
+            $linkText = trim($node->text());
+            if (preg_match('/(\d+\s*(?:zł|PLN|€|\$))/i', $linkText, $matches)) {
+                $price = $matches[1];
+            }
+            
+            // Last resort: extract price from raw HTML
+            if (!$price) {
+                $html = $node->html();
+                if (preg_match('/(\d+(?:\s*\d+)*(?:,\d+)?\s*(?:zł|PLN|€|\$))/i', $html, $matches)) {
+                    $price = $matches[1];
+                }
+            }
                 }
             }
             
@@ -166,8 +179,13 @@ function fetchListings(Client $client, string $url): array {
         // Location - try to extract from OLX listing
         $location = '';
         try {
-            // Try different location selectors for OLX
-            $locationSelectors = ['.css-veheph', '.css-17o22yg', '.css-1a4brun', '[data-cy="l-card-location"]', '.location', '.offer-location'];
+            // Try different location selectors for OLX - expanded list
+            $locationSelectors = [
+                '.css-veheph', '.css-17o22yg', '.css-1a4brun', '[data-cy="l-card-location"]', 
+                '.location', '.offer-location', '.css-1u2vqda', '.css-1bafgv4',
+                'p[data-testid="location-date"]', 'span[data-testid="location-date"]',
+                '.css-1u2vqda', 'p.css-1u2vqda', 'span.css-1u2vqda'
+            ];
             foreach ($locationSelectors as $selector) {
                 $locationNode = $node->filter($selector)->first();
                 if ($locationNode->count()) {
@@ -191,6 +209,15 @@ function fetchListings(Client $client, string $url): array {
             $location = strip_tags($location);
             $location = preg_replace('/\s+/', ' ', $location);
             $location = trim($location);
+            
+            // Last resort: extract location from raw HTML
+            if (!$location) {
+                $html = $node->html();
+                // Look for common Polish city patterns
+                if (preg_match('/(Warszawa|Kraków|Gdańsk|Wrocław|Poznań|Łódź|Szczecin|Bydgoszcz|Lublin|Katowice|Białystok|Gdynia|Częstochowa|Radom|Sosnowiec|Toruń|Kielce|Gliwice|Zabrze|Bytom|Olsztyn|Bielsko-Biała|Rzeszów|Ruda Śląska|Rybnik|Tychy|Dąbrowa Górnicza|Płock|Elbląg|Opole|Gorzów Wielkopolski|Włocławek|Zielona Góra|Tarnów|Chorzów|Kalisz|Koszalin|Legnica|Grudziądz|Słupsk|Jaworzno|Jastrzębie-Zdrój|Jelenia Góra|Nowy Sącz|Jelenia Góra|Konin|Piotrków Trybunalski|Lubin|Inowrocław|Ostrów Wielkopolski|Stargard|Mysłowice|Piła|Ostrowiec Świętokrzyski|Siedlce|Mielec|Oława|Gniezno|Głogów|Swarzędz|Tarnobrzeg|Żory|Pruszków|Racibórz|Świętochłowice|Zawiercie|Starachowice|Skierniewice|Kutno|Otwock|Żywiec|Wejherowo|Zgierz|Będzin|Pabianice|Rumia|Świdnica|Żyrardów|Kraśnik|Mikołów|Łomża|Żagań|Świnoujście|Kołobrzeg|Ostrołęka|Stalowa Wola|Myszków|Łuków|Grodzisk Mazowiecki|Skarżysko-Kamienna|Jarocin|Krotoszyn|Zduńska Wola|Śrem|Kłodzko|Nowa Sól|Środa Wielkopolska|Gostyń|Rawicz|Kępno|Ostrzeszów|Jarocin|Krotoszyn|Zduńska Wola|Śrem|Kłodzko|Nowa Sól|Środa Wielkopolska|Gostyń|Rawicz|Kępno|Ostrzeszów)/i', $html, $matches)) {
+                    $location = $matches[1];
+                }
+            }
             
             // If no location found, use default
             if (!$location) {
@@ -271,7 +298,7 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
             "url" => $url,
             "color" => 3066993, // Green color
             "timestamp" => date('c'),
-            "description" => "📌 " . strtolower($title ?: "iPhone listing") . "\n💰 Cena: " . ($price ?: "Cena do uzgodnienia") . "\n📍 Lokalizacja: " . ($listing['location'] ?? 'Warszawa') . "\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
+            "description" => "📌 " . ($title ?: "iPhone listing") . "\n💰 Cena: " . ($price ?: "Cena do uzgodnienia") . "\n📍 Lokalizacja: " . ($listing['location'] ?? 'Brak') . "\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
             "thumbnail" => [
                 "url" => "https://www.olx.pl/favicon.ico"
             ]
