@@ -163,6 +163,43 @@ function fetchListings(Client $client, string $url): array {
             $price = '';
         }
 
+        // Location - try to extract from OLX listing
+        $location = '';
+        try {
+            // Try different location selectors for OLX
+            $locationSelectors = ['.css-veheph', '.css-17o22yg', '.css-1a4brun', '[data-cy="l-card-location"]', '.location', '.offer-location'];
+            foreach ($locationSelectors as $selector) {
+                $locationNode = $node->filter($selector)->first();
+                if ($locationNode->count()) {
+                    $location = trim($locationNode->text());
+                    if ($location) break;
+                }
+            }
+            
+            // Try to find location in the same container
+            if (!$location) {
+                $container = $node->closest('div, article, section');
+                if ($container->count()) {
+                    $locationNode = $container->filter('.css-veheph, .css-17o22yg, .location')->first();
+                    if ($locationNode->count()) {
+                        $location = trim($locationNode->text());
+                    }
+                }
+            }
+            
+            // Clean up location
+            $location = strip_tags($location);
+            $location = preg_replace('/\s+/', ' ', $location);
+            $location = trim($location);
+            
+            // If no location found, use default
+            if (!$location) {
+                $location = 'Brak';
+            }
+        } catch (Exception $e) {
+            $location = 'Brak';
+        }
+
         // Image
         $img = null;
         try {
@@ -184,6 +221,7 @@ function fetchListings(Client $client, string $url): array {
             'title' => $title ?: 'No title',
             'url' => $href,
             'price' => $price ?: '—',
+            'location' => $location,
             'img' => $img
         ];
     });
@@ -220,7 +258,7 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
             "url" => $url,
             "color" => 3066993, // Green color
             "timestamp" => date('c'),
-            "description" => "📌 " . strtolower($title ?: "iPhone listing") . "\n💰 Cena: " . ($price ?: "Cena do uzgodnienia") . "\n📍 Lokalizacja: Warszawa\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
+            "description" => "📌 " . strtolower($title ?: "iPhone listing") . "\n💰 Cena: " . ($price ?: "Cena do uzgodnienia") . "\n📍 Lokalizacja: " . ($listing['location'] ?? 'Warszawa') . "\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
             "thumbnail" => [
                 "url" => "https://www.olx.pl/favicon.ico"
             ]
