@@ -117,9 +117,20 @@ function fetchListings(Client $client, string $url): array {
             
             // Try parent elements for price
             if (!$price) {
-                $parent = $node->parents()->filter('.price, .offer-price')->first();
-                if ($parent->count()) {
-                    $price = trim($parent->text());
+                try {
+                    $parent = $node->parents()->filter('.price, .offer-price')->first();
+                    if ($parent->count()) {
+                        $price = trim($parent->text());
+                    }
+                } catch (Exception $e) {
+                    // Fallback: try to find price in the same container
+                    $container = $node->closest('div, article, section');
+                    if ($container->count()) {
+                        $priceNode = $container->filter('.price, .offer-price')->first();
+                        if ($priceNode->count()) {
+                            $price = trim($priceNode->text());
+                        }
+                    }
                 }
             }
             
@@ -255,7 +266,7 @@ function healthCheck() {
 }
 
 // Handle health check requests
-if (isset($_GET['health']) || $_SERVER['REQUEST_URI'] === '/health') {
+if (isset($_GET['health']) || (isset($_SERVER['REQUEST_URI']) && $_SERVER['REQUEST_URI'] === '/health')) {
     healthCheck();
 }
 
