@@ -1,199 +1,281 @@
+#!/usr/bin/env php
 <?php
+/**
+ * olx_sniperbot.php
+ * - Polls OLX search results for new iPhone listings (API-first placeholder; fallback to scraping)
+ * - Stores seen listing IDs in SQLite (seen.sqlite)
+ * - Posts new listings to a Discord webhook
+ *
+ * Requirements: PHP 8+, SQLite PDO extension enabled, CLI environment.
+ *
+ * Usage:
+ *   php olx_sniperbot.php
+ *
+ * Notes:
+ *  - Respect OLX terms and robots.txt.
+ *  - Keep poll interval reasonable (30-120s).
+ */
 
-require __DIR__ . '/vendor/autoload.php';
+/* ----------------- CONFIG ----------------- */
+const CONFIG = [
+    // Preferred: OLX API base and token (if you have developer access). Leave empty to use scraping.
+    'OLX_API_BASE' => '',   
+    'OLX_API_TOKEN' => '',
 
-use GuzzleHttp\Client;
-use Symfony\Component\DomCrawler\Crawler;
-use Dotenv\Dotenv;
+    // Scrape fallback search URL. Adjust to city/filters: e.g. "https://www.olx.pl/d/oferty/q-iphone/warszawa/"
+    'SCRAPE_SEARCH_URL' => 'https://www.olx.pl/oferty/q-iphone/',
 
-$dotenv = Dotenv::createImmutable(__DIR__);
-$dotenv->safeLoad();
+    // Discord webhook to post messages to
+    'DISCORD_WEBHOOK' => 'https://discord.com/api/webhooks/1428608006811029504/Jjgdw6tDxuU2x0d2Ra72-s6pPwl6oOXEfSvusSFJkXCZQP_D1os7bsj5sUYOF8S2vVgP',
 
-$searchUrl = rtrim($_ENV['OLX_SEARCH_URL'] ?? '', '/');
-$webhookUrl = $_ENV['DISCORD_WEBHOOK_URL'] ?? '';
-$pollInterval = intval($_ENV['POLL_INTERVAL'] ?? 30);
-$userAgent = $_ENV['USER_AGENT'] ?? 'OlxSniperBot/1.0 (+https://example.com)';
-$dbPath = $_ENV['DB_PATH'] ?? __DIR__ . '/seen.sqlite';
+    // How often to poll (seconds)
+    'POLL_INTERVAL' => 15,
 
-if (!$searchUrl || !$webhookUrl) {
-    fwrite(STDERR, "Set OLX_SEARCH_URL and DISCORD_WEBHOOK_URL in .env\n");
-    exit(1);
+    // Filtering keywords to match title (case-insensitive)
+    'KEYWORDS' => ['iphone', 'iPhone 15', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'],
+
+    // Max results to parse per poll
+    'MAX_RESULTS' => 50,
+];
+/* ------------------------------------------ */
+
+function log_msg(string $s) {
+    echo "[" . date('Y-m-d H:i:s') . "] " . $s . PHP_EOL;
 }
 
-// Setup HTTP client
-$client = new Client([
-    'headers' => [
-        'User-Agent' => $userAgent,
-        'Accept-Language' => 'en-US,en;q=0.9'
-    ],
-    'timeout' => 20,
-]);
+/* ---------- Database (SQLite) ---------- */
+function get_db(): PDO {
+    $dbfile = __DIR__ . '/seen.sqlite';
+    $dsn = "sqlite:$dbfile";
+    $pdo = new PDO($dsn);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS seen (
+        id TEXT PRIMARY KEY,
+        url TEXT,
+        title TEXT,
+        price TEXT,
+        seen_at INTEGER
+    )");
+    return $pdo;
+}
 
-// Setup SQLite
-$pdo = new PDO('sqlite:' . $dbPath);
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$pdo->exec('CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, title TEXT, url TEXT, price TEXT, seen_at INTEGER)');
-
-// Helper to check/insert seen
-function isSeen(PDO $pdo, string $id): bool {
-    $stmt = $pdo->prepare('SELECT 1 FROM seen WHERE id = :id LIMIT 1');
+function is_seen(PDO $pdo, string $id): bool {
+    $stmt = $pdo->prepare("SELECT 1 FROM seen WHERE id = :id LIMIT 1");
     $stmt->execute([':id' => $id]);
     return (bool)$stmt->fetchColumn();
 }
-function markSeen(PDO $pdo, array $row) {
-    $stmt = $pdo->prepare('INSERT OR IGNORE INTO seen (id, title, url, price, seen_at) VALUES (:id, :title, :url, :price, :seen_at)');
+
+function mark_seen(PDO $pdo, array $listing) {
+    $stmt = $pdo->prepare("INSERT OR IGNORE INTO seen (id, url, title, price, seen_at) VALUES (:id, :url, :title, :price, :seen_at)");
     $stmt->execute([
-        ':id' => $row['id'],
-        ':title' => $row['title'],
-        ':url' => $row['url'],
-        ':price' => $row['price'],
+        ':id' => $listing['id'],
+        ':url' => $listing['url'],
+        ':title' => $listing['title'],
+        ':price' => $listing['price'] ?? null,
         ':seen_at' => time()
     ]);
 }
 
-// Function to fetch and parse listings
-function fetchListings(Client $client, string $url): array {
-    try {
-        $resp = $client->get($url);
-        $html = (string)$resp->getBody();
-    } catch (Exception $e) {
-        fwrite(STDERR, "[" . date('c') . "] Fetch error: " . $e->getMessage() . PHP_EOL);
+/* ---------- Discord webhook ---------- */
+function post_to_discord(string $webhook, array $listing): bool {
+    $payload = [
+        'embeds' => [[
+            'title' => $listing['title'] ?? 'New listing',
+            'url' => $listing['url'] ?? null,
+            'description' => isset($listing['price']) ? "Price: {$listing['price']}" : '',
+            'fields' => [
+                ['name' => 'ID', 'value' => $listing['id'], 'inline' => true],
+            ],
+        ]]
+    ];
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $ch = curl_init($webhook);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $json);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    $resp = curl_exec($ch);
+    $err = curl_error($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($err) {
+        log_msg("Discord post error: $err");
+        return false;
+    }
+    if ($code < 200 || $code >= 300) {
+        log_msg("Discord returned HTTP $code. Resp: $resp");
+        return false;
+    }
+    return true;
+}
+
+/* ---------- OLX API placeholder (adapt to real API if you get credentials) ---------- */
+function fetch_from_api(string $base, string $token, array $keywords, ?string $location=null, $max_price=null): array {
+    // This is a placeholder skeleton. Fill with real OLX API endpoints/params when you have them.
+    if (empty($base) || empty($token)) return [];
+    $url = rtrim($base, '/') . '/offers/?q=' . urlencode(implode(' ', $keywords)) . '&limit=20';
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $token",
+        "Accept: application/json",
+        "User-Agent: OLXSniperBot/1.0"
+    ]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $resp = curl_exec($ch);
+    if ($resp === false) {
+        log_msg("API fetch failed: " . curl_error($ch));
+        curl_close($ch);
+        return [];
+    }
+    curl_close($ch);
+    $data = json_decode($resp, true);
+    if (!is_array($data)) return [];
+    $listings = [];
+    // Adapt parsing to the API's JSON schema
+    foreach ($data['data'] ?? [] as $item) {
+        $listings[] = [
+            'id' => (string)($item['id'] ?? $item['offerId'] ?? null),
+            'title' => $item['title'] ?? null,
+            'url' => $item['url'] ?? null,
+            'price' => $item['price']['value'] ?? ($item['price'] ?? null),
+            'location' => $item['location']['label'] ?? null,
+        ];
+    }
+    return $listings;
+}
+
+/* ---------- Scraping fallback (polite) ---------- */
+function fetch_by_scraping(string $search_url, array $keywords, int $max_results = 50): array {
+    // Use a polite UA and timeout
+    $opts = [
+        "http" => [
+            "method" => "GET",
+            "header" => "User-Agent: Mozilla/5.0 (compatible; OLXSniperBot/1.0; +https://example.com/bot)\r\n",
+            "timeout" => 15
+        ]
+    ];
+    $context = stream_context_create($opts);
+
+    $html = @file_get_contents($search_url, false, $context);
+    if ($html === false) {
+        log_msg("Failed to fetch $search_url");
         return [];
     }
 
-    $crawler = new Crawler($html);
+    libxml_use_internal_errors(true);
+    $dom = new DOMDocument();
+    $dom->loadHTML($html);
+    $xpath = new DOMXPath($dom);
 
-    $listings = [];
-
-    // Find anchors that contain "/oferta/" in the href
-    $crawler->filter('a[href*="/oferta/"]')->each(function (Crawler $node) use (&$listings) {
-        $href = $node->attr('href') ?: '';
-        // Normalize OLX internal links
+    // Look for anchors that include '/oferta/' — common OLX pattern
+    $anchors = $xpath->query("//a[contains(@href, '/oferta/')]");
+    $results = [];
+    foreach ($anchors as $a) {
+        if (!($a instanceof DOMElement)) continue;
+        $href = $a->getAttribute('href');
+        // Normalize relative URLs
         if (strpos($href, 'http') !== 0) {
-            $href = 'https://www.olx.pl' . $href;
+            $href = rtrim($search_url, '/') . '/' . ltrim($href, '/');
         }
 
-        // Try to extract an ID from the URL: OLX often has "-<digits>/" or at the end "-1234567890"
+        $title = trim($a->textContent);
+        if ($title === '') {
+            // sometimes the title is inside child elements; try parent
+            $title = trim($a->getAttribute('title') ?: '');
+        }
+        $title = mb_substr($title, 0, 200);
+
+        // Extract ID from URL if present (OLX often has last token as ID)
         $id = null;
-        if (preg_match('/-([0-9]+)(?:[\/?#]|$)/', $href, $m)) {
+        if (preg_match('~/oferta/[^/]+-([A-Za-z0-9]+)(?:\.html)?~', $href, $m)) {
             $id = $m[1];
-        } elseif (preg_match('/oferta\/([^\/?#]+)(?:[\/?#]|$)/', $href, $m2)) {
-            $id = $m2[1];
         } else {
+            // fallback to using URL as ID
             $id = md5($href);
         }
 
-        // Title
-        $title = trim($node->text());
-        // Fallback: look for headings inside
-        if ($title === '') {
-            $titleNode = $node->filter('h3, h4, h5, h6')->first();
-            $title = $titleNode->count() ? trim($titleNode->text()) : $title;
-        }
-
-        // Price: try to find within the anchor or within parent nodes
-        $price = '';
-        try {
-            $priceNode = $node->filter('.price, .offer-price, .css-1oarkqv'); // keep a few common classes; adjust if needed
-            if ($priceNode->count()) {
-                $price = trim($priceNode->text());
-            } else {
-                // search parent for price
-                $p = $node->ancestors()->filter('.price, .offer-price')->first();
-                if ($p->count()) $price = trim($p->text());
-            }
-        } catch (Exception $e) {
-            $price = '';
-        }
-
-        // Image (optional)
-        $img = null;
-        try {
-            $imgNode = $node->filter('img')->first();
-            if ($imgNode->count()) {
-                $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: null;
-            }
-        } catch (Exception $e) {
-            $img = null;
-        }
-
-        $listings[] = [
-            'id' => $id,
-            'title' => $title ?: 'No title',
-            'url' => $href,
-            'price' => $price ?: '—',
-            'img' => $img
-        ];
-    });
-
-    // Remove duplicates by id, keep order
-    $unique = [];
-    foreach ($listings as $l) {
-        if (!isset($unique[$l['id']])) $unique[$l['id']] = $l;
-    }
-
-    return array_values($unique);
-}
-
-// Send to Discord webhook
-function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
-    $content = "**" . addslashes($listing['title']) . "**\nPrice: " . $listing['price'] . "\n" . $listing['url'];
-    $payload = [
-        'content' => $content
-    ];
-
-    // If image available, send as embed (simple)
-    if (!empty($listing['img'])) {
-        $payload['embeds'] = [[
-            'title' => $listing['title'],
-            'url' => $listing['url'],
-            'image' => ['url' => $listing['img']],
-            'fields' => [
-                ['name' => 'Price', 'value' => $listing['price'], 'inline' => true]
-            ]
-        ]];
-    }
-
-    try {
-        $resp = $client->post($webhookUrl, [
-            'json' => $payload,
-            'headers' => ['Content-Type' => 'application/json']
-        ]);
-        return $resp->getStatusCode() >= 200 && $resp->getStatusCode() < 300;
-    } catch (Exception $e) {
-        fwrite(STDERR, "[" . date('c') . "] Discord send error: " . $e->getMessage() . PHP_EOL);
-        return false;
-    }
-}
-
-// Main loop
-fwrite(STDOUT, "[" . date('c') . "] Starting OLX sniper. Polling {$searchUrl} every {$pollInterval}s\n");
-while (true) {
-    try {
-        $listings = fetchListings($client, $searchUrl);
-        if (empty($listings)) {
-            fwrite(STDOUT, "[" . date('c') . "] No listings parsed or error.\n");
+        // Price: try to find nearest text node with "zł"
+        $price = null;
+        $maybe = $xpath->query("(.//text())[contains(., 'zł')]", $a);
+        if ($maybe->length > 0) {
+            $price = trim($maybe->item(0)->nodeValue);
         } else {
-            // iterate in reverse order if you want older->newer; here we process in listing order
+            // look sibling nodes
+            $sibling = $a->nextSibling;
+            if ($sibling && $sibling->nodeType === XML_ELEMENT_NODE) {
+                $text = $sibling->textContent;
+                if (strpos($text, 'zł') !== false) $price = trim($text);
+            }
+        }
+
+        // Keyword filtering (case-insensitive)
+        $lower = mb_strtolower($title . ' ' . $price);
+        $keep = false;
+        foreach ($keywords as $k) {
+            if (mb_stripos($lower, mb_strtolower($k)) !== false) {
+                $keep = true;
+                break;
+            }
+        }
+        if (!$keep) continue;
+
+        $results[$id] = [
+            'id' => $id,
+            'url' => $href,
+            'title' => $title ?: 'No title',
+            'price' => $price ?: null,
+        ];
+        if (count($results) >= $max_results) break;
+    }
+    return array_values($results);
+}
+
+/* ---------- Main loop ---------- */
+function main() {
+    $cfg = CONFIG;
+    $pdo = get_db();
+    log_msg("Starting OLX sniper bot (PHP). Press Ctrl-C to stop.");
+
+    while (true) {
+        try {
+            $listings = [];
+
+            if (!empty($cfg['OLX_API_BASE']) && !empty($cfg['OLX_API_TOKEN'])) {
+                log_msg("Trying OLX API...");
+                $listings = fetch_from_api($cfg['OLX_API_BASE'], $cfg['OLX_API_TOKEN'], $cfg['KEYWORDS']);
+            } else {
+                log_msg("Using scraper fallback...");
+                $listings = fetch_by_scraping($cfg['SCRAPE_SEARCH_URL'], $cfg['KEYWORDS'], $cfg['MAX_RESULTS']);
+            }
+
+            if (empty($listings)) {
+                log_msg("No listings fetched this cycle.");
+            }
+
             foreach ($listings as $l) {
-                if (!isSeen($pdo, $l['id'])) {
-                    fwrite(STDOUT, "[" . date('c') . "] New listing: {$l['title']} ({$l['id']})\n");
-                    $ok = notifyDiscord($webhookUrl, $l, $client);
+                if (empty($l['id'])) continue;
+                if (!is_seen($pdo, $l['id'])) {
+                    log_msg("New: " . ($l['title'] ?? 'No title') . " | " . ($l['url'] ?? 'no-url'));
+                    mark_seen($pdo, $l);
+                    $ok = post_to_discord($cfg['DISCORD_WEBHOOK'], $l);
                     if ($ok) {
-                        markSeen($pdo, $l);
-                        // brief sleep between posts to avoid webhook rate limits
-                        sleep(1);
+                        log_msg("Posted to Discord: {$l['id']}");
                     } else {
-                        fwrite(STDERR, "[" . date('c') . "] Failed to notify Discord for {$l['id']}\n");
+                        log_msg("Failed to post to Discord for {$l['id']}");
                     }
+                } else {
+                    // already seen
                 }
             }
-        }
-    } catch (Exception $e) {
-        fwrite(STDERR, "[" . date('c') . "] Unexpected error: " . $e->getMessage() . PHP_EOL);
-    }
 
-    // sleep poll interval with jitter to avoid perfect periodicity
-    $jitter = rand(0, intval(max(1, $pollInterval * 0.2)));
-    sleep(max(1, $pollInterval + $jitter - intval($pollInterval*0.1)));
+            // Respectful sleep
+            sleep((int)$cfg['POLL_INTERVAL']);
+        } catch (Exception $e) {
+            log_msg("Unexpected error: " . $e->getMessage());
+            sleep(30);
+        }
+    }
 }
+
+main();
