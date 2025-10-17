@@ -227,12 +227,38 @@ function fetchListings(Client $client, string $url): array {
             $location = 'Brak';
         }
 
-        // Image
+        // Image - try multiple selectors and attributes
         $img = null;
         try {
-            $imgNode = $node->filter('img')->first();
-            if ($imgNode->count()) {
-                $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: null;
+            // Try different image selectors
+            $imgSelectors = ['img', '.css-1bmvjcs img', '.css-1bmvjcs', 'img[data-src]', 'img[src]'];
+            foreach ($imgSelectors as $selector) {
+                $imgNode = $node->filter($selector)->first();
+                if ($imgNode->count()) {
+                    $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: $imgNode->attr('data-lazy-src') ?: null;
+                    if ($img) break;
+                }
+            }
+            
+            // If no image found, try to find any img in the container
+            if (!$img) {
+                $container = $node->closest('div, article, section');
+                if ($container->count()) {
+                    $imgNode = $container->filter('img')->first();
+                    if ($imgNode->count()) {
+                        $img = $imgNode->attr('src') ?: $imgNode->attr('data-src') ?: $imgNode->attr('data-lazy-src') ?: null;
+                    }
+                }
+            }
+            
+            // Clean up image URL
+            if ($img) {
+                // Remove query parameters that might break the URL
+                $img = strtok($img, '?');
+                // Ensure it's a valid URL
+                if (!filter_var($img, FILTER_VALIDATE_URL)) {
+                    $img = null;
+                }
             }
         } catch (Exception $e) {
             $img = null;
@@ -280,8 +306,9 @@ function fetchListings(Client $client, string $url): array {
 // Send to Discord webhook with retry logic
 function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
     // Clean and validate data
-    $title = substr($listing['title'], 0, 256); // Discord title limit
-    $price = substr($listing['price'], 0, 100); // Reasonable price limit
+    $title = $listing['title'] ?: 'iPhone listing';
+    $price = $listing['price'] ?: 'Cena do uzgodnienia';
+    $location = $listing['location'] ?: 'Brak';
     $url = $listing['url'];
     
     // Ensure URL is valid
@@ -298,7 +325,7 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
             "url" => $url,
             "color" => 3066993, // Green color
             "timestamp" => date('c'),
-            "description" => "📌 " . ($title ?: "iPhone listing") . "\n💰 Cena: " . ($price ?: "Cena do uzgodnienia") . "\n📍 Lokalizacja: " . ($listing['location'] ?? 'Brak') . "\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
+            "description" => "📌 " . $title . "\n💰 Cena: " . $price . "\n📍 Lokalizacja: " . $location . "\n📦 Dostawa: TAK\n🔗 Link do ogłoszenia",
             "thumbnail" => [
                 "url" => "https://www.olx.pl/favicon.ico"
             ]
@@ -320,6 +347,11 @@ function notifyDiscord(string $webhookUrl, array $listing, Client $client) {
     // Add image if available and valid
     if (!empty($listing['img']) && filter_var($listing['img'], FILTER_VALIDATE_URL)) {
         $data['embeds'][0]['thumbnail'] = ['url' => $listing['img']];
+        error_log("Using listing image: " . $listing['img']);
+    } else {
+        // Use OLX favicon as fallback
+        $data['embeds'][0]['thumbnail'] = ['url' => 'https://www.olx.pl/favicon.ico'];
+        error_log("No valid image found, using OLX favicon");
     }
 
     // Debug Discord notification data
