@@ -77,26 +77,55 @@ function fetchListings(Client $client, string $url): array {
             $id = md5($href); // fallback
         }
 
-        // Title
+        // Title - try multiple selectors for OLX
         $title = '';
         try {
-            $titleNode = $node->filter('h6')->first();
-            if ($titleNode->count()) {
-                $title = trim($titleNode->text());
-            } else {
+            // Try different title selectors
+            $titleSelectors = ['h6', 'h3', 'h4', '.css-16v5mdi', '.css-1oarkqv', '[data-cy="l-card-title"]', '.offer-title'];
+            foreach ($titleSelectors as $selector) {
+                $titleNode = $node->filter($selector)->first();
+                if ($titleNode->count()) {
+                    $title = trim($titleNode->text());
+                    if ($title) break;
+                }
+            }
+            
+            // Fallback to node text or title attribute
+            if (!$title) {
                 $title = $node->attr('title') ?: trim($node->text());
             }
+            
+            // Clean up title
+            $title = preg_replace('/\s+/', ' ', $title);
+            $title = trim($title);
         } catch (Exception $e) {
             $title = trim($node->text());
         }
 
-        // Price
+        // Price - try multiple selectors for OLX
         $price = '';
         try {
-            $priceNode = $node->filter('.price, .offer-price')->first();
-            if ($priceNode->count()) {
-                $price = trim($priceNode->text());
+            // Try different price selectors
+            $priceSelectors = ['.price', '.offer-price', '.css-1oarkqv', '[data-cy="l-card-price"]', '.css-10b0gli', '.css-1sw7q4x'];
+            foreach ($priceSelectors as $selector) {
+                $priceNode = $node->filter($selector)->first();
+                if ($priceNode->count()) {
+                    $price = trim($priceNode->text());
+                    if ($price) break;
+                }
             }
+            
+            // Try parent elements for price
+            if (!$price) {
+                $parent = $node->parents()->filter('.price, .offer-price')->first();
+                if ($parent->count()) {
+                    $price = trim($parent->text());
+                }
+            }
+            
+            // Clean up price
+            $price = preg_replace('/\s+/', ' ', $price);
+            $price = trim($price);
         } catch (Exception $e) {
             $price = '';
         }
@@ -110,6 +139,11 @@ function fetchListings(Client $client, string $url): array {
             }
         } catch (Exception $e) {
             $img = null;
+        }
+
+        // Debug logging
+        if (empty($title) || empty($price)) {
+            error_log("Debug - Listing {$id}: Title='{$title}', Price='{$price}', URL='{$href}'");
         }
 
         $listings[] = [
@@ -228,6 +262,9 @@ if (isset($_GET['health']) || $_SERVER['REQUEST_URI'] === '/health') {
 // Main loop
 error_log("[" . date('c') . "] Starting OLX sniper bot (Cloud). Polling {$searchUrl} every {$pollInterval}s");
 
+// First run: mark all current listings as seen (don't notify)
+$isFirstRun = true;
+
 while (true) {
     try {
         error_log("[" . date('c') . "] Polling " . $searchUrl);
@@ -237,11 +274,28 @@ while (true) {
             error_log("[" . date('c') . "] No listings parsed or error.");
         } else {
             $newCount = 0;
+            $currentListingIds = [];
             
+            // Collect all current listing IDs
+            foreach ($listings as $listing) {
+                $currentListingIds[] = $listing['id'];
+            }
+            
+            // On first run, mark all current listings as seen
+            if ($isFirstRun) {
+                error_log("[" . date('c') . "] First run - marking " . count($currentListingIds) . " current listings as seen");
+                $seen = array_unique(array_merge($seen, $currentListingIds));
+                saveSeen($seen, $seenFile);
+                $isFirstRun = false;
+                error_log("[" . date('c') . "] First run complete. Future runs will only show new listings.");
+                continue;
+            }
+            
+            // Check for new listings
             foreach ($listings as $listing) {
                 if (!in_array($listing['id'], $seen)) {
                     $newCount++;
-                    error_log("[" . date('c') . "] New listing: {$listing['title']} ({$listing['id']})");
+                    error_log("[" . date('c') . "] NEW listing: {$listing['title']} ({$listing['id']})");
                     
                     $success = notifyDiscord($webhookUrl, $listing, $client);
                     if ($success) {
@@ -256,10 +310,17 @@ while (true) {
                 }
             }
             
+            // Clean up old seen IDs (keep only recent ones)
+            if (count($seen) > 1000) {
+                $seen = array_slice($seen, -500); // Keep only last 500
+                saveSeen($seen, $seenFile);
+                error_log("[" . date('c') . "] Cleaned up old seen listings. Kept " . count($seen) . " recent ones.");
+            }
+            
             if ($newCount === 0) {
-                error_log("[" . date('c') . "] No new listings found.");
+                error_log("[" . date('c') . "] No new listings found. Total listings: " . count($listings));
             } else {
-                error_log("[" . date('c') . "] Found {$newCount} new listings.");
+                error_log("[" . date('c') . "] Found {$newCount} new listings out of " . count($listings) . " total.");
             }
         }
     } catch (Exception $e) {
