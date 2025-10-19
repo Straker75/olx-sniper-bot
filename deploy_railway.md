@@ -31,7 +31,7 @@ git push -u origin main
 In Railway dashboard, go to **Variables** tab and add:
 
 ```
-OLX_SEARCH_URL=https://www.olx.pl/oferty/q-iphone/
+OLX_SEARCH_URL=https://www.olx.pl/oferty/q-iphone/?search%5Border%5D=created_at:desc
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
 POLL_INTERVAL=45
 USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36

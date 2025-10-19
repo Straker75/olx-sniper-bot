@@ -484,7 +484,7 @@ class OLXSniperBot:
         return None
     
     def extract_publish_date(self, element):
-        """Extract publish date from listing element"""
+        """Extract publish date from listing element and add 2 hours to time"""
         try:
             # Get all text from the element first
             all_text = element.get_text()
@@ -504,6 +504,21 @@ class OLXSniperBot:
                 date_match = re.search(pattern, all_text)
                 if date_match:
                     date_found = date_match.group(1)
+                    
+                    # If it's a time pattern like "Dzisiaj o 10:06", add 2 hours
+                    if 'o \d{1,2}:\d{2}' in pattern:
+                        time_match = re.search(r'(\d{1,2}):(\d{2})', date_found)
+                        if time_match:
+                            hour = int(time_match.group(1))
+                            minute = time_match.group(2)
+                            # Add 2 hours
+                            new_hour = hour + 2
+                            if new_hour >= 24:
+                                new_hour = new_hour - 24
+                            corrected_time = f"{new_hour:02d}:{minute}"
+                            date_found = date_found.replace(time_match.group(0), corrected_time)
+                            logger.info(f"Added 2 hours to time: {date_match.group(1)} -> {date_found}")
+                    
                     logger.info(f"Found date with pattern '{pattern}': {date_found}")
                     return date_found
             
@@ -536,6 +551,21 @@ class OLXSniperBot:
                         date_match = re.search(pattern, date_text)
                         if date_match:
                             date_found = date_match.group(1)
+                            
+                            # If it's a time pattern like "Dzisiaj o 10:06", add 2 hours
+                            if 'o \d{1,2}:\d{2}' in pattern:
+                                time_match = re.search(r'(\d{1,2}):(\d{2})', date_found)
+                                if time_match:
+                                    hour = int(time_match.group(1))
+                                    minute = time_match.group(2)
+                                    # Add 2 hours
+                                    new_hour = hour + 2
+                                    if new_hour >= 24:
+                                        new_hour = new_hour - 24
+                                    corrected_time = f"{new_hour:02d}:{minute}"
+                                    date_found = date_found.replace(time_match.group(0), corrected_time)
+                                    logger.info(f"Added 2 hours to time: {date_match.group(1)} -> {date_found}")
+                            
                             logger.info(f"Found date with selector '{selector}' and pattern '{pattern}': {date_found}")
                             return date_found
             
@@ -576,14 +606,11 @@ class OLXSniperBot:
             poland_tz = pytz.timezone('Europe/Warsaw')
             poland_time = datetime.now(poland_tz)
             
-            # Add 2 hours to match Polish time
-            corrected_time = poland_time + timedelta(hours=2)
-            
             embed_data = {
                 "title": listing['title'],
                 "url": listing['url'],
                 "color": 3066993,  # Green color
-                "timestamp": corrected_time.isoformat(),
+                "timestamp": poland_time.isoformat(),
                 "description": f"📌 {listing['title']}\n💰 Cena: {listing['price']}\n📍 Lokalizacja: {listing['location']}\n📅 Data: {listing.get('publish_date', 'Dzisiaj')}"
             }
             
