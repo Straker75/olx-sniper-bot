@@ -260,26 +260,40 @@ class OLXSniperBot:
                 '.css-17o22yg',
                 '.css-1a4brun',
                 '[class*="location"]',
-                '[class*="city"]'
+                '[class*="city"]',
+                'small',
+                'span[class*="css-"]',
+                'p[class*="css-"]'
             ]
             
             for selector in location_selectors:
                 location_elem = element.select_one(selector)
                 if location_elem:
                     location_text = location_elem.get_text().strip()
+                    logger.info(f"Checking location text with selector '{selector}': {location_text}")
+                    
                     # Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
                     location_match = re.search(r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', location_text)
                     if location_match:
-                        logger.debug(f"Found location with selector '{selector}': {location_match.group(1)}")
-                        return location_match.group(1).strip()
+                        location = location_match.group(1).strip()
+                        logger.info(f"Found location with selector '{selector}': {location}")
+                        return location
+                    
+                    # Also try to extract just the location part if it looks like a city
+                    if len(location_text) > 3 and len(location_text) < 50 and not any(char.isdigit() for char in location_text):
+                        logger.info(f"Found potential location with selector '{selector}': {location_text}")
+                        return location_text
             
             # Look for location patterns in all text
             text = element.get_text()
+            logger.info(f"Checking all text for location: {text[:200]}...")
+            
             # Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
             location_match = re.search(r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', text)
             if location_match:
-                logger.debug(f"Found location in text: {location_match.group(1)}")
-                return location_match.group(1).strip()
+                location = location_match.group(1).strip()
+                logger.info(f"Found location in text: {location}")
+                return location
             
             # Look for common Polish cities
             cities = ['Warszawa', 'Kraków', 'Gdańsk', 'Wrocław', 'Poznań', 'Łódź', 'Szczecin', 
@@ -299,14 +313,17 @@ class OLXSniperBot:
                      'Żagań', 'Świnoujście', 'Kołobrzeg', 'Ostrołęka', 'Stalowa Wola', 
                      'Myszków', 'Łuków', 'Grodzisk Mazowiecki', 'Skarżysko-Kamienna', 
                      'Jarocin', 'Krotoszyn', 'Zduńska Wola', 'Śrem', 'Kłodzko', 'Nowa Sól', 
-                     'Środa Wielkopolska', 'Gostyń', 'Rawicz', 'Kępno', 'Ostrzeszów', 'Brzesko']
+                     'Środa Wielkopolska', 'Gostyń', 'Rawicz', 'Kępno', 'Ostrzeszów', 'Brzesko',
+                     'Murowana Goślina', 'Olszowice']
             
             for city in cities:
                 if city.lower() in text.lower():
-                    logger.debug(f"Found city in text: {city}")
+                    logger.info(f"Found city in text: {city}")
                     return city
+                    
+            logger.info("No location found in any method")
         except Exception as e:
-            logger.debug(f"Error extracting location: {e}")
+            logger.info(f"Error extracting location: {e}")
         return None
     
     def extract_image(self, element):
@@ -458,49 +475,34 @@ class OLXSniperBot:
                 logger.info(f"Found date in text: {date_match.group(1)}")
                 return date_match.group(1)
             
-            # Since we can't find dates, let's be more lenient and include recent offers
-            # Check if this looks like a recent offer by looking for "Wyróżnione" (featured)
-            if 'Wyróżnione' in text:
-                logger.info("Found 'Wyróżnione' (featured) - assuming recent offer")
-                return "Dzisiaj"
-            
-            # If no date found, assume it's recent (since we're getting current listings)
-            logger.info("No date found, assuming recent offer")
-            return "Dzisiaj"
+            # If no date found, return None (don't assume it's recent)
+            logger.info("No date found - will exclude this offer")
+            return None
                 
         except Exception as e:
             logger.info(f"Error extracting publish date: {e}")
-            return "Dzisiaj"
+            return None
     
     def is_today_offer(self, date_str):
-        """Check if the offer is from today"""
+        """Check if the offer is from today - ONLY include offers with 'Dzisiaj'"""
         if not date_str:
-            # If no date found, include it (since we're having trouble extracting dates)
-            logger.info("No date found, including offer as recent")
-            return True
+            # If no date found, exclude it (be strict)
+            logger.info("No date found - EXCLUDING offer")
+            return False
         
         try:
-            # Check for "Dzisiaj" (Today)
+            # ONLY include offers with "Dzisiaj" (Today)
             if 'Dzisiaj' in date_str:
                 logger.info(f"Found 'Dzisiaj' in date: {date_str} - INCLUDING")
                 return True
             
-            # Check for specific date format (DD.MM.YYYY)
-            if re.match(r'\d{1,2}\.\d{1,2}\.\d{4}', date_str):
-                from datetime import datetime
-                today = datetime.now()
-                offer_date = datetime.strptime(date_str, '%d.%m.%Y')
-                is_today = offer_date.date() == today.date()
-                logger.info(f"Date comparison: {date_str} vs {today.strftime('%d.%m.%Y')} = {is_today}")
-                return is_today
-            
-            # If date format is not recognized, include it (be lenient)
-            logger.info(f"Unrecognized date format, including offer: {date_str}")
-            return True
-            
+            # Exclude everything else (Wczoraj, specific dates, etc.)
+            logger.info(f"Date is not 'Dzisiaj': {date_str} - EXCLUDING")
+            return False
+                
         except Exception as e:
-            logger.info(f"Error checking if offer is from today: {e}, including offer")
-            return True
+            logger.info(f"Error checking date: {e} - EXCLUDING")
+            return False
     
     def send_discord_notification(self, listing):
         """Send Discord webhook notification"""
