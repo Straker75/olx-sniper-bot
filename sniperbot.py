@@ -578,7 +578,7 @@ class OLXSniperBot:
             return None
     
     def is_today_offer(self, date_str):
-        """Check if the offer is from today and within the last 2 minutes"""
+        """Check if the offer is from today and within the last 2 minutes compared to Discord notification time"""
         if not date_str:
             # If no date found, exclude it (be strict)
             logger.info("No date found - EXCLUDING offer")
@@ -587,34 +587,37 @@ class OLXSniperBot:
         try:
             # ONLY include offers with "Dzisiaj" (Today)
             if 'Dzisiaj' in date_str:
-                # Check if it has a time like "Dzisiaj o 12:21"
+                # Check if it has a time like "Dzisiaj o 12:24"
                 time_match = re.search(r'Dzisiaj o (\d{1,2}):(\d{2})', date_str)
                 if time_match:
                     offer_hour = int(time_match.group(1))
                     offer_minute = int(time_match.group(2))
                     
-                    # Get current Polish time
+                    # Get current Polish time (Discord notification time)
                     poland_tz = pytz.timezone('Europe/Warsaw')
-                    current_time = datetime.now(poland_tz)
-                    current_hour = current_time.hour
-                    current_minute = current_time.minute
+                    discord_time = datetime.now(poland_tz)
+                    discord_hour = discord_time.hour
+                    discord_minute = discord_time.minute
                     
                     # Calculate time difference in minutes
-                    current_total_minutes = current_hour * 60 + current_minute
+                    discord_total_minutes = discord_hour * 60 + discord_minute
                     offer_total_minutes = offer_hour * 60 + offer_minute
                     
+                    # Calculate difference: Discord time - Offer time
+                    time_diff_minutes = discord_total_minutes - offer_total_minutes
+                    
                     # Handle day rollover (if offer is from yesterday but still "Dzisiaj")
-                    if offer_total_minutes > current_total_minutes:
-                        offer_total_minutes -= 24 * 60  # Subtract 24 hours
+                    if time_diff_minutes < 0:
+                        time_diff_minutes += 24 * 60  # Add 24 hours
                     
-                    time_diff_minutes = current_total_minutes - offer_total_minutes
+                    logger.info(f"Offer time: {offer_hour:02d}:{offer_minute:02d}, Discord time: {discord_hour:02d}:{discord_minute:02d}, Difference: {time_diff_minutes} minutes")
                     
-                    # Only include offers published within the last 2 minutes
+                    # Only include offers where Discord time is max 2 minutes after offer time
                     if time_diff_minutes <= 2 and time_diff_minutes >= 0:
-                        logger.info(f"Found recent offer: {date_str} (published {time_diff_minutes} minutes ago) - INCLUDING")
+                        logger.info(f"Found recent offer: {date_str} (Discord is {time_diff_minutes} minutes after offer) - INCLUDING")
                         return True
                     else:
-                        logger.info(f"Found old offer: {date_str} (published {time_diff_minutes} minutes ago) - EXCLUDING")
+                        logger.info(f"Found old offer: {date_str} (Discord is {time_diff_minutes} minutes after offer) - EXCLUDING")
                         return False
                 else:
                     # If it's just "Dzisiaj" without time, include it
