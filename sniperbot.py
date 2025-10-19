@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from urllib.parse import urljoin, urlparse
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 # Load environment variables
@@ -572,15 +572,18 @@ class OLXSniperBot:
         """Send Discord webhook notification"""
         try:
             # Prepare Discord embed data
-            # Get Polish timezone
+            # Get Polish timezone (UTC+2)
             poland_tz = pytz.timezone('Europe/Warsaw')
             poland_time = datetime.now(poland_tz)
+            
+            # Add 2 hours to match Polish time
+            corrected_time = poland_time + timedelta(hours=2)
             
             embed_data = {
                 "title": listing['title'],
                 "url": listing['url'],
                 "color": 3066993,  # Green color
-                "timestamp": poland_time.isoformat(),
+                "timestamp": corrected_time.isoformat(),
                 "description": f"📌 {listing['title']}\n💰 Cena: {listing['price']}\n📍 Lokalizacja: {listing['location']}\n📅 Data: {listing.get('publish_date', 'Dzisiaj')}"
             }
             
