@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from urllib.parse import urljoin, urlparse
 import re
 from datetime import datetime
+import pytz
 
 # Load environment variables
 load_dotenv('ini.env')
@@ -571,11 +572,15 @@ class OLXSniperBot:
         """Send Discord webhook notification"""
         try:
             # Prepare Discord embed data
+            # Get Polish timezone
+            poland_tz = pytz.timezone('Europe/Warsaw')
+            poland_time = datetime.now(poland_tz)
+            
             embed_data = {
                 "title": listing['title'],
                 "url": listing['url'],
                 "color": 3066993,  # Green color
-                "timestamp": datetime.utcnow().isoformat() + 'Z',
+                "timestamp": poland_time.isoformat(),
                 "description": f"📌 {listing['title']}\n💰 Cena: {listing['price']}\n📍 Lokalizacja: {listing['location']}\n📅 Data: {listing.get('publish_date', 'Dzisiaj')}"
             }
             
