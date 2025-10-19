@@ -93,33 +93,55 @@ class OLXSniperBot:
             # Find listing containers - look for containers that have offer links
             listing_containers = []
             
-            # First, find all offer links
-            offer_links = soup.find_all('a', href=True)
-            offer_links = [link for link in offer_links if '/oferta/' in link.get('href', '')]
+            # Alternative approach: Look for common OLX listing containers
+            # Try different selectors that might contain listings
+            listing_selectors = [
+                '[data-testid="listing"]',
+                '[data-testid="ad-card"]',
+                '.css-1sw7q4x',  # Common OLX listing class
+                '.css-1ap3yc9',  # Another common OLX class
+                '[class*="css-"][class*="listing"]',
+                '[class*="css-"][class*="card"]',
+                '[class*="css-"][class*="offer"]'
+            ]
             
-            logger.info(f"Found {len(offer_links)} offer links")
+            for selector in listing_selectors:
+                found_containers = soup.select(selector)
+                if found_containers:
+                    logger.info(f"Found {len(found_containers)} containers with selector: {selector}")
+                    listing_containers.extend(found_containers)
+                    break
             
-            for link in offer_links:
-                # Find the container that contains this link
-                container = link
-                # Go up the DOM tree to find a suitable container
-                for _ in range(5):  # Limit search depth
-                    container = container.parent
-                    if not container:
-                        break
-                    
-                    # Check if this container looks like a listing container
-                    container_class = container.get('class', [])
-                    container_class_str = ' '.join(container_class).lower()
-                    
-                    if any(keyword in container_class_str for keyword in ['css-', 'listing', 'offer', 'card', 'item']):
-                        if container not in listing_containers:
-                            listing_containers.append(container)
-                        break
-                else:
-                    # If no suitable container found, use the link itself
-                    if link not in listing_containers:
-                        listing_containers.append(link)
+            # If no containers found with selectors, fall back to the original method
+            if not listing_containers:
+                logger.info("No containers found with selectors, trying original method...")
+                # First, find all offer links
+                offer_links = soup.find_all('a', href=True)
+                offer_links = [link for link in offer_links if '/oferta/' in link.get('href', '')]
+                
+                logger.info(f"Found {len(offer_links)} offer links")
+                
+                for link in offer_links:
+                    # Find the container that contains this link
+                    container = link
+                    # Go up the DOM tree to find a suitable container
+                    for _ in range(5):  # Limit search depth
+                        container = container.parent
+                        if not container:
+                            break
+                        
+                        # Check if this container looks like a listing container
+                        container_class = container.get('class', [])
+                        container_class_str = ' '.join(container_class).lower()
+                        
+                        if any(keyword in container_class_str for keyword in ['css-', 'listing', 'offer', 'card', 'item']):
+                            if container not in listing_containers:
+                                listing_containers.append(container)
+                            break
+                    else:
+                        # If no suitable container found, use the link itself
+                        if link not in listing_containers:
+                            listing_containers.append(link)
             
             logger.info(f"Found {len(listing_containers)} listing containers")
             
@@ -143,11 +165,17 @@ class OLXSniperBot:
                 if not title:
                     title = "iPhone na OLX"
                 
+                # Debug: Log container HTML to see what we're working with
+                logger.info(f"Container HTML for {title}: {str(container)[:300]}...")
+                
                 # Extract data from the container (better context)
                 price = self.extract_price(container)
                 location = self.extract_location(container)
                 image = self.extract_image(container)
                 publish_date = self.extract_publish_date(container)
+                
+                # Debug: Log what we extracted
+                logger.info(f"Extracted data for {title}: price={price}, location={location}, date={publish_date}")
                 
                 # Debug logging for image extraction
                 if not image:
@@ -252,10 +280,33 @@ class OLXSniperBot:
     def extract_location(self, element):
         """Extract location from listing element"""
         try:
-            # Look for location in specific elements first
+            # Get all text from the element first
+            all_text = element.get_text()
+            logger.info(f"All text from element for location: {all_text[:300]}...")
+            
+            # Look for location-date pattern in all text first (most reliable)
+            # Pattern like "Murowana Goślina - Dzisiaj o 11:49"
+            location_patterns = [
+                r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj o \d{1,2}:\d{2})',
+                r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Wczoraj o \d{1,2}:\d{2})',
+                r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj)',
+                r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Wczoraj)',
+                r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(\d{1,2}\.\d{1,2}\.\d{4})'
+            ]
+            
+            for pattern in location_patterns:
+                location_match = re.search(pattern, all_text)
+                if location_match:
+                    location = location_match.group(1).strip()
+                    logger.info(f"Found location with pattern '{pattern}': {location}")
+                    return location
+            
+            # If no pattern match, try specific selectors
             location_selectors = [
                 'p[data-testid="location-date"]',
                 'span[data-testid="location-date"]',
+                'p[data-testid="location"]',
+                'span[data-testid="location"]',
                 '.css-veheph',
                 '.css-17o22yg',
                 '.css-1a4brun',
@@ -263,7 +314,9 @@ class OLXSniperBot:
                 '[class*="city"]',
                 'small',
                 'span[class*="css-"]',
-                'p[class*="css-"]'
+                'p[class*="css-"]',
+                '[class*="css-"][class*="location"]',
+                '[class*="css-"][class*="city"]'
             ]
             
             for selector in location_selectors:
@@ -272,30 +325,20 @@ class OLXSniperBot:
                     location_text = location_elem.get_text().strip()
                     logger.info(f"Checking location text with selector '{selector}': {location_text}")
                     
-                    # Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
-                    location_match = re.search(r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', location_text)
-                    if location_match:
-                        location = location_match.group(1).strip()
-                        logger.info(f"Found location with selector '{selector}': {location}")
-                        return location
+                    # Try the same patterns on this specific element
+                    for pattern in location_patterns:
+                        location_match = re.search(pattern, location_text)
+                        if location_match:
+                            location = location_match.group(1).strip()
+                            logger.info(f"Found location with selector '{selector}' and pattern '{pattern}': {location}")
+                            return location
                     
                     # Also try to extract just the location part if it looks like a city
                     if len(location_text) > 3 and len(location_text) < 50 and not any(char.isdigit() for char in location_text):
                         logger.info(f"Found potential location with selector '{selector}': {location_text}")
                         return location_text
             
-            # Look for location patterns in all text
-            text = element.get_text()
-            logger.info(f"Checking all text for location: {text[:200]}...")
-            
-            # Look for location-date pattern like "Brzesko - Dzisiaj o 10:32"
-            location_match = re.search(r'([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]+)\s*-\s*(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', text)
-            if location_match:
-                location = location_match.group(1).strip()
-                logger.info(f"Found location in text: {location}")
-                return location
-            
-            # Look for common Polish cities
+            # Look for common Polish cities in all text
             cities = ['Warszawa', 'Kraków', 'Gdańsk', 'Wrocław', 'Poznań', 'Łódź', 'Szczecin', 
                      'Bydgoszcz', 'Lublin', 'Katowice', 'Białystok', 'Gdynia', 'Częstochowa', 
                      'Radom', 'Sosnowiec', 'Toruń', 'Kielce', 'Gliwice', 'Zabrze', 'Bytom', 
@@ -317,8 +360,8 @@ class OLXSniperBot:
                      'Murowana Goślina', 'Olszowice']
             
             for city in cities:
-                if city.lower() in text.lower():
-                    logger.info(f"Found city in text: {city}")
+                if city.lower() in all_text.lower():
+                    logger.info(f"Found city in all text: {city}")
                     return city
                     
             logger.info("No location found in any method")
@@ -442,10 +485,33 @@ class OLXSniperBot:
     def extract_publish_date(self, element):
         """Extract publish date from listing element"""
         try:
-            # Look for date in specific elements first
+            # Get all text from the element first
+            all_text = element.get_text()
+            logger.info(f"All text from element: {all_text[:300]}...")
+            
+            # Look for date patterns in all text first (most reliable)
+            date_patterns = [
+                r'(Dzisiaj o \d{1,2}:\d{2})',  # "Dzisiaj o 11:49"
+                r'(Wczoraj o \d{1,2}:\d{2})',  # "Wczoraj o 15:20"
+                r'(Dzisiaj)',                   # Just "Dzisiaj"
+                r'(Wczoraj)',                   # Just "Wczoraj"
+                r'(\d{1,2}\.\d{1,2}\.\d{4})',  # "17.10.2024"
+                r'(\d{1,2} \w+ \d{4})',        # "17 października 2024"
+            ]
+            
+            for pattern in date_patterns:
+                date_match = re.search(pattern, all_text)
+                if date_match:
+                    date_found = date_match.group(1)
+                    logger.info(f"Found date with pattern '{pattern}': {date_found}")
+                    return date_found
+            
+            # If no date found in text, try specific selectors
             date_selectors = [
                 'p[data-testid="location-date"]',
                 'span[data-testid="location-date"]',
+                'p[data-testid="date"]',
+                'span[data-testid="date"]',
                 '.css-veheph',
                 '.css-17o22yg',
                 '.css-1a4brun',
@@ -453,7 +519,9 @@ class OLXSniperBot:
                 '[class*="time"]',
                 'small',
                 'span[class*="css-"]',
-                'p[class*="css-"]'
+                'p[class*="css-"]',
+                '[class*="css-"][class*="date"]',
+                '[class*="css-"][class*="time"]'
             ]
             
             for selector in date_selectors:
@@ -461,21 +529,16 @@ class OLXSniperBot:
                 if date_elem:
                     date_text = date_elem.get_text().strip()
                     logger.info(f"Checking date text with selector '{selector}': {date_text}")
-                    # Look for date patterns like "Dzisiaj o 10:32", "Wczoraj o 15:20", "17.10.2024"
-                    date_match = re.search(r'(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', date_text)
-                    if date_match:
-                        logger.info(f"Found date with selector '{selector}': {date_match.group(1)}")
-                        return date_match.group(1)
+                    
+                    # Look for date patterns in this specific element
+                    for pattern in date_patterns:
+                        date_match = re.search(pattern, date_text)
+                        if date_match:
+                            date_found = date_match.group(1)
+                            logger.info(f"Found date with selector '{selector}' and pattern '{pattern}': {date_found}")
+                            return date_found
             
-            # Look for date patterns in all text
-            text = element.get_text()
-            logger.info(f"Checking all text for date: {text[:200]}...")
-            date_match = re.search(r'(Dzisiaj|Wczoraj|\d{1,2}\.\d{1,2}\.\d{4})', text)
-            if date_match:
-                logger.info(f"Found date in text: {date_match.group(1)}")
-                return date_match.group(1)
-            
-            # If no date found, return None (don't assume it's recent)
+            # If still no date found, return None (don't assume it's recent)
             logger.info("No date found - will exclude this offer")
             return None
                 
