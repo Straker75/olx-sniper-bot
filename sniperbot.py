@@ -578,7 +578,7 @@ class OLXSniperBot:
             return None
     
     def is_today_offer(self, date_str):
-        """Check if the offer is from today - ONLY include offers with 'Dzisiaj'"""
+        """Check if the offer is from today and within the last 2 minutes"""
         if not date_str:
             # If no date found, exclude it (be strict)
             logger.info("No date found - EXCLUDING offer")
@@ -587,8 +587,39 @@ class OLXSniperBot:
         try:
             # ONLY include offers with "Dzisiaj" (Today)
             if 'Dzisiaj' in date_str:
-                logger.info(f"Found 'Dzisiaj' in date: {date_str} - INCLUDING")
-                return True
+                # Check if it has a time like "Dzisiaj o 12:21"
+                time_match = re.search(r'Dzisiaj o (\d{1,2}):(\d{2})', date_str)
+                if time_match:
+                    offer_hour = int(time_match.group(1))
+                    offer_minute = int(time_match.group(2))
+                    
+                    # Get current Polish time
+                    poland_tz = pytz.timezone('Europe/Warsaw')
+                    current_time = datetime.now(poland_tz)
+                    current_hour = current_time.hour
+                    current_minute = current_time.minute
+                    
+                    # Calculate time difference in minutes
+                    current_total_minutes = current_hour * 60 + current_minute
+                    offer_total_minutes = offer_hour * 60 + offer_minute
+                    
+                    # Handle day rollover (if offer is from yesterday but still "Dzisiaj")
+                    if offer_total_minutes > current_total_minutes:
+                        offer_total_minutes -= 24 * 60  # Subtract 24 hours
+                    
+                    time_diff_minutes = current_total_minutes - offer_total_minutes
+                    
+                    # Only include offers published within the last 2 minutes
+                    if time_diff_minutes <= 2 and time_diff_minutes >= 0:
+                        logger.info(f"Found recent offer: {date_str} (published {time_diff_minutes} minutes ago) - INCLUDING")
+                        return True
+                    else:
+                        logger.info(f"Found old offer: {date_str} (published {time_diff_minutes} minutes ago) - EXCLUDING")
+                        return False
+                else:
+                    # If it's just "Dzisiaj" without time, include it
+                    logger.info(f"Found 'Dzisiaj' without time: {date_str} - INCLUDING")
+                    return True
             
             # Exclude everything else (Wczoraj, specific dates, etc.)
             logger.info(f"Date is not 'Dzisiaj': {date_str} - EXCLUDING")
